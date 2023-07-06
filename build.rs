@@ -13,14 +13,18 @@ fn main() {
         .flag("-v")
         .flag("-g");
 
-    // ターゲットプラットフォームに基づいてソースファイルを選択します。
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
     match target_os.as_str() {
         "ios" => {
-            build.file("src/cpp/src/native_ios.cpp");
+            build.file("src/cpp/src/native_darwin.cpp");
         }
         "android" => {
-            build.file("src/cpp/src/native_android.cpp");
+            build.cpp_link_stdlib("stdc++");
+            println!("cargo:rustc-link-lib=static=c++_static");
+            println!("cargo:rustc-link-lib=static=c++abi");
+            println!("cargo:rustc-link-lib=static=c++");
+            println!("cargo:rustc-cfg=TARGET_IS_ANDROID");
+            build.file("src/cpp/src/native_linux.cpp");
         }
         _ => {
             panic!("Unsupported target OS");

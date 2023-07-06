@@ -14,8 +14,12 @@ def get_processid_by_name(name):
         pids = (
             process["pid"] for process in process_list if process["processname"] == name
         )
-
-        pid = list(pids)[0]
+        pid_list = list(pids)
+        if len(pid_list) == 0:
+            print("Process name not found")
+            return False
+        else:
+            pid = pid_list[0]
         return pid
     else:
         print(f"Failed to enumerate process:{enumprocess_response.content.decode()}")

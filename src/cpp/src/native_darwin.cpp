@@ -10,7 +10,6 @@
 
 typedef struct {
   int pid;
-  // char processname[256];
   char *processname;
 } ProcessInfo;
 
@@ -145,9 +144,7 @@ extern "C" ProcessInfo *enumprocess_native(size_t *count) {
 
     for (size_t i = 0; i < *count; i++) {
       processes[i].pid = result[i].kp_proc.p_pid;
-      // strncpy(processes[i].processname, result[i].kp_proc.p_comm, 255);
-      processes[i].processname = strdup(
-          result[i].kp_proc.p_comm); // processes[i].processname[255] = '\0';
+      processes[i].processname = strdup(result[i].kp_proc.p_comm);
     }
 
     free(result);

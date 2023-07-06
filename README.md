@@ -1,19 +1,21 @@
-# memory_server
+# memory-server
 
 Memory scanner &amp; analyzer with REST API.
 
 # Usage
 
+## iOS
+
 Jailbreaking of iphone is required.  
 Place your PC and iphone in the same network.  
-Place memory_server and Entitlements.plist in /usr/bin.
+Place memory-server and Entitlements.plist in /usr/bin.
 
 Connect to the iphone via ssh.
 
 ```sh
 cd /usr/bin
-ldid -SEntitlements.plist memory_server
-./memory_server
+ldid -SEntitlements.plist memory-server
+./memory-server
 ```
 
 The httpserver starts at port `3030`.

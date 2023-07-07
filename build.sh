@@ -9,8 +9,7 @@ if [ "$1" == "--target" ]; then
         TARGET_AR=build/NDK/arm64/bin/llvm-ar
         TARGET_LINKER=build/NDK/arm64/bin/aarch64-linux-android-clang
 
-        sudo RUSTFLAGS=$RUSTFLAGS \
-             CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$TARGET_LINKER \
+        sudo CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$TARGET_LINKER \
              TARGET_AR=$TARGET_AR \
              TARGET_CC=$TARGET_CC \
              TARGET_CXX=$TARGET_CXX \

@@ -2,7 +2,7 @@ use crate::util;
 use aho_corasick::AhoCorasick;
 use hex;
 use lazy_static::lazy_static;
-use libc::{self, c_char, c_int, c_long, c_void, iovec, off_t, pid_t, O_RDONLY};
+use libc::{self, c_char, c_int, c_long, c_void, off_t, O_RDONLY};
 use regex::bytes::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;

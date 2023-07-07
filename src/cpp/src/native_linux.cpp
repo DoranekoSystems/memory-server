@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <fstream>
 #include <iostream>
+#include <cstring>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/queue.h>

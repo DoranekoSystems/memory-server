@@ -19,6 +19,9 @@ fn main() {
         "windows" => {
             build.file("src/cpp/src/native_windows.cpp");
         }
+        "macos" => {
+            build.file("src/cpp/src/native_darwin.cpp");
+        }
         "ios" => {
             build.file("src/cpp/src/native_darwin.cpp");
         }

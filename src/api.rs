@@ -1,8 +1,10 @@
 use crate::util;
+use crate::util::binary_search;
 use aho_corasick::AhoCorasick;
 use hex;
 use lazy_static::lazy_static;
 use libc::{self, c_char, c_int, c_long, c_void, off_t, O_RDONLY};
+use rayon::prelude::*;
 use regex::bytes::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -13,10 +15,9 @@ use std::io::Error;
 use std::io::{BufRead, BufReader};
 use std::sync::RwLock;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use warp::hyper::Body;
 use warp::{http::Response, http::StatusCode, Filter, Rejection, Reply};
-
-use crate::util::binary_search;
 
 #[link(name = "native", kind = "static")]
 extern "C" {
@@ -27,6 +28,12 @@ extern "C" {
         address: libc::uintptr_t,
         size: libc::size_t,
         buffer: *mut u8,
+    ) -> libc::ssize_t;
+    fn write_memory_native(
+        pid: i32,
+        address: libc::uintptr_t,
+        size: libc::size_t,
+        buffer: *const u8,
     ) -> libc::ssize_t;
 }
 
@@ -106,6 +113,50 @@ pub async fn read_memory_handler(
 }
 
 #[derive(Deserialize)]
+pub struct WriteMemoryRequest {
+    address: usize,
+    buffer: Vec<u8>,
+}
+
+pub async fn write_memory_handler(
+    pid_state: Arc<Mutex<Option<i32>>>,
+    write_memory: WriteMemoryRequest,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    let pid = pid_state.lock().unwrap();
+
+    if let Some(pid) = *pid {
+        let nwrite = write_process_memory(
+            pid,
+            write_memory.address as *mut libc::c_void,
+            write_memory.buffer.len(),
+            &write_memory.buffer,
+        );
+        match nwrite {
+            Ok(_) => {
+                let response = Response::builder()
+                    .header("Content-Type", "text/plain")
+                    .body(hyper::Body::from("Memory successfully written"))
+                    .unwrap();
+                return Ok(response);
+            }
+            Err(_) => {
+                let response = Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(hyper::Body::from("WriteProcessMemory error"))
+                    .unwrap();
+                return Ok(response);
+            }
+        };
+    } else {
+        let response = Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(hyper::Body::from("Pid not set"))
+            .unwrap();
+        Ok(response)
+    }
+}
+
+#[derive(Deserialize)]
 pub struct MemoryScanRequest {
     pattern: String,
     address_ranges: Vec<(usize, usize)>,
@@ -126,6 +177,9 @@ pub async fn memory_scan_handler(
             global_positions.clear();
         }
 
+        /*
+        Single Thread
+        let st_start_time = Instant::now();
         // Loop through the address ranges
         for (start_address, end_address) in scan_request.address_ranges.iter() {
             let size = end_address - start_address;
@@ -171,7 +225,9 @@ pub async fn memory_scan_handler(
                     }
                 };
                 // Use Aho-Corasick for pattern matching
-                let ac = AhoCorasick::new_auto_configured(&[bytes]);
+                let ac = AhoCorasick::new_auto_configured(&[bytes.clone()]);
+
+                let ac_start_time = Instant::now();
                 for mat in ac.find_iter(&buffer) {
                     let start = mat.start();
                     let value = scan_request.pattern.clone();
@@ -179,6 +235,68 @@ pub async fn memory_scan_handler(
                     global_positions.push((start_address + start, value));
                 }
             }
+        }
+        let st_end_time = st_start_time.elapsed();
+        println!("Single Thread time: {:?}", st_end_time);
+        */
+
+        // let mt_start_time = Instant::now();
+        // Loop through the address ranges
+        let thread_results: Vec<Vec<(usize, String)>> = scan_request
+            .address_ranges
+            .par_iter()
+            .map(|(start_address, end_address)| {
+                let size = end_address - start_address;
+                let mut buffer: Vec<u8> = vec![0; size];
+                let mut local_positions = vec![];
+                let _nread = match read_process_memory(
+                    pid,
+                    *start_address as *mut libc::c_void,
+                    size,
+                    &mut buffer,
+                ) {
+                    Ok(nread) => nread,
+                    Err(err) => -1,
+                };
+
+                if _nread != -1 {
+                    if scan_request.is_regex {
+                        let regex_pattern = &scan_request.pattern;
+                        let re = match Regex::new(regex_pattern) {
+                            Ok(re) => re,
+                            Err(_) => return vec![],
+                        };
+                        for cap in re.captures_iter(&buffer) {
+                            let start = cap.get(0).unwrap().start();
+                            let end = cap.get(0).unwrap().end();
+                            let value = hex::encode(&buffer[start..end]);
+                            local_positions.push((*start_address + start, value));
+                        }
+                    } else {
+                        let result = hex::decode(&scan_request.pattern);
+                        let bytes = match result {
+                            Ok(bytes) => bytes,
+                            Err(_) => return vec![],
+                        };
+                        let ac = AhoCorasick::new_auto_configured(&[bytes.clone()]);
+                        for mat in ac.find_iter(&buffer) {
+                            let start = mat.start();
+                            let value = scan_request.pattern.clone();
+                            local_positions.push((*start_address + start, value));
+                        }
+                    }
+                }
+                local_positions
+            })
+            .collect();
+
+        // let mt_end_time = mt_start_time.elapsed();
+        // println!("Multi Thread time: {:?}", mt_end_time);
+        let flattened_results: Vec<(usize, String)> =
+            thread_results.into_iter().flatten().collect();
+        {
+            let mut global_positions = GLOBAL_POSITIONS.write().unwrap();
+            global_positions.extend(flattened_results);
         }
 
         if scan_request.return_as_json {
@@ -332,6 +450,21 @@ fn read_process_memory(
 ) -> Result<isize, Error> {
     let result =
         unsafe { read_memory_native(pid, address as libc::uintptr_t, size, buffer.as_mut_ptr()) };
+    if result >= 0 {
+        Ok(result as isize)
+    } else {
+        Err(Error::last_os_error())
+    }
+}
+
+fn write_process_memory(
+    pid: i32,
+    address: *mut libc::c_void,
+    size: usize,
+    buffer: &[u8],
+) -> Result<isize, Error> {
+    let result =
+        unsafe { write_memory_native(pid, address as libc::uintptr_t, size, buffer.as_ptr()) };
     if result >= 0 {
         Ok(result as isize)
     } else {

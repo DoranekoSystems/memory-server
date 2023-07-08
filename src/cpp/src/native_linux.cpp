@@ -1,14 +1,16 @@
 #include <cstdio>
+#include <cstring>
 #include <dirent.h>
 #include <dlfcn.h>
 #include <errno.h>
 #include <fstream>
 #include <iostream>
-#include <cstring>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/ptrace.h>
 #include <sys/queue.h>
 #include <sys/uio.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 typedef struct {
@@ -23,7 +25,7 @@ typedef ssize_t (*process_vm_readv_func)(pid_t, const struct iovec *,
 static process_vm_readv_func PROCESS_VM_READV = nullptr;
 #endif
 
-extern "C" ssize_t read_memory_native(int pid, uint64_t address, uint32_t size,
+extern "C" ssize_t read_memory_native(int pid, uintptr_t address, size_t size,
                                       unsigned char *buffer) {
 #ifdef TARGET_IS_ANDROID
   if (!PROCESS_VM_READV) {
@@ -65,6 +67,36 @@ extern "C" ssize_t read_memory_native(int pid, uint64_t address, uint32_t size,
   }
 
   return nread;
+}
+
+extern "C" ssize_t write_memory_native(int pid, void *address, size_t size,
+                                       unsigned char *buffer) {
+
+  // Attach to the process
+  ptrace(PTRACE_ATTACH, pid, NULL, NULL);
+  waitpid(pid, NULL, 0);
+
+  // Write to the process's memory
+  for (int i = 0; i < size; i += sizeof(long)) {
+    if (size - i < sizeof(long)) {
+      // Read the original memory
+      long orig = ptrace(PTRACE_PEEKDATA, pid,
+                         reinterpret_cast<char *>(address) + i, NULL);
+
+      // Prepare the data to be written
+      std::memcpy(&orig, reinterpret_cast<char *>(buffer) + i, size - i);
+
+      // Write the data to the process's memory
+      ptrace(PTRACE_POKEDATA, pid, reinterpret_cast<char *>(address) + i, orig);
+    } else {
+      long data;
+      std::memcpy(&data, reinterpret_cast<char *>(buffer) + i, sizeof(long));
+      ptrace(PTRACE_POKEDATA, pid, reinterpret_cast<char *>(address) + i, data);
+    }
+  }
+
+  // Detach from the process
+  ptrace(PTRACE_DETACH, pid, NULL, NULL);
 }
 
 extern "C" void enumerate_regions_to_buffer(pid_t pid, char *buffer,

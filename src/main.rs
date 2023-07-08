@@ -30,6 +30,14 @@ async fn main() {
             api::read_memory_handler(pid_state, read_memory).await
         });
 
+    let write_memory = warp::path!("writememory")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(api::with_state(pid_state.clone()))
+        .and_then(|write_memory, pid_state| async move {
+            api::write_memory_handler(pid_state, write_memory).await
+        });
+
     let memory_scan = warp::path!("memoryscan")
         .and(warp::post())
         .and(warp::body::json())
@@ -51,6 +59,7 @@ async fn main() {
         .and_then(|pid_state| async move { api::enumerate_regions_handler(pid_state).await });
     let routes = open_process
         .or(read_memory)
+        .or(write_memory)
         .or(memory_scan)
         .or(memory_filter)
         .or(enumregions)

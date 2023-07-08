@@ -1,6 +1,6 @@
 # memory-server
 
-Memory scanner &amp; analyzer with REST API.
+High-Speed Memory Scanner &amp; Analyzer with REST API.
 
 # Usage
 

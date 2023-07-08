@@ -47,6 +47,50 @@ extern "C" ssize_t read_memory_native(int pid, mach_vm_address_t address,
   return (ssize_t)out_size;
 }
 
+extern "C" ssize_t write_memory_native(int pid, mach_vm_address_t address,
+                                       mach_vm_size_t size,
+                                       unsigned char *buffer) {
+  task_t task;
+  kern_return_t err;
+  vm_prot_t original_protection;
+  vm_region_basic_info_data_64_t info;
+  mach_msg_type_number_t info_count = VM_REGION_BASIC_INFO_COUNT_64;
+  mach_port_t object_name;
+
+  err = task_for_pid(mach_task_self(), pid, &task);
+  if (err != KERN_SUCCESS) {
+    return -1;
+  }
+
+  // Get the current protection
+  err = mach_vm_region(task, address, size, VM_REGION_BASIC_INFO_64,
+                       (vm_region_info_t)&info, &info_count, &object_name);
+  if (err != KERN_SUCCESS) {
+    return -1;
+  }
+  original_protection = info.protection;
+
+  // Change the memory protection to allow writing
+  err = mach_vm_protect(task, address, size, FALSE,
+                        VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+  if (err != KERN_SUCCESS) {
+    return -1;
+  }
+
+  err = mach_vm_write(task, address, (vm_offset_t)buffer, size);
+  if (err != KERN_SUCCESS) {
+    return -1;
+  }
+
+  // Reset the memory protection
+  err = mach_vm_protect(task, address, size, FALSE, original_protection);
+  if (err != KERN_SUCCESS) {
+    return -1;
+  }
+
+  return size;
+}
+
 extern "C" void enumerate_regions_to_buffer(pid_t pid, char *buffer,
                                             size_t buffer_size) {
 

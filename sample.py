@@ -65,6 +65,7 @@ def find(pattern, address_ranges, is_regex=False, return_as_json=False):
         "address_ranges": address_ranges,
         "is_regex": is_regex,
         "return_as_json": return_as_json,
+        "scan_id": "Scan 1",
     }
 
     start = time.time()
@@ -88,6 +89,7 @@ def filter(pattern, is_regex=False, return_as_json=False):
         "pattern": pattern,
         "is_regex": is_regex,
         "return_as_json": return_as_json,
+        "scan_id": "Scan 1",
     }
 
     start = time.time()

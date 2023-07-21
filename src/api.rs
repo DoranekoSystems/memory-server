@@ -8,6 +8,7 @@ use rayon::prelude::*;
 use regex::bytes::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::ffi::CString;
 use std::fs::File;
@@ -44,7 +45,8 @@ struct ProcessInfo {
 }
 
 lazy_static! {
-    static ref GLOBAL_POSITIONS: RwLock<Vec<(usize, String)>> = RwLock::new(Vec::new());
+    static ref GLOBAL_POSITIONS: RwLock<HashMap<String, Vec<(usize, String)>>> =
+        RwLock::new(HashMap::new());
 }
 
 pub fn with_state(
@@ -162,6 +164,7 @@ pub struct MemoryScanRequest {
     address_ranges: Vec<(usize, usize)>,
     is_regex: bool,
     return_as_json: bool,
+    scan_id: String,
 }
 
 pub async fn memory_scan_handler(
@@ -171,77 +174,15 @@ pub async fn memory_scan_handler(
     let pid = pid_state.lock().unwrap();
 
     if let Some(pid) = *pid {
-        // Clear global_positions
+        // Clear global_positions for the given scan_id
         {
             let mut global_positions = GLOBAL_POSITIONS.write().unwrap();
-            global_positions.clear();
-        }
-
-        /*
-        Single Thread
-        let st_start_time = Instant::now();
-        // Loop through the address ranges
-        for (start_address, end_address) in scan_request.address_ranges.iter() {
-            let size = end_address - start_address;
-            let mut buffer: Vec<u8> = vec![0; size];
-            let _nread = match read_process_memory(
-                pid,
-                *start_address as *mut libc::c_void,
-                size,
-                &mut buffer,
-            ) {
-                Ok(nread) => nread,
-                Err(err) => -1,
-            };
-
-            if _nread == -1 {
-                continue;
-            }
-
-            if scan_request.is_regex {
-                // Use bytes crate to perform regex search
-                let regex_pattern = &scan_request.pattern;
-                let re = match Regex::new(regex_pattern) {
-                    Ok(re) => re,
-                    Err(_) => continue,
-                };
-                for cap in re.captures_iter(&buffer) {
-                    let start = cap.get(0).unwrap().start();
-                    let end = cap.get(0).unwrap().end();
-                    let value = hex::encode(&buffer[start..end]);
-                    let mut global_positions = GLOBAL_POSITIONS.write().unwrap();
-                    global_positions.push((start_address + start, value));
-                }
+            if let Some(positions) = global_positions.get_mut(&scan_request.scan_id) {
+                positions.clear();
             } else {
-                let result = hex::decode(&scan_request.pattern);
-                let bytes = match result {
-                    Ok(bytes) => bytes,
-                    Err(_) => {
-                        let response = Response::builder()
-                            .status(StatusCode::BAD_REQUEST)
-                            .body(hyper::Body::from("Invalid hex pattern"))
-                            .unwrap();
-                        return Ok(response);
-                    }
-                };
-                // Use Aho-Corasick for pattern matching
-                let ac = AhoCorasick::new_auto_configured(&[bytes.clone()]);
-
-                let ac_start_time = Instant::now();
-                for mat in ac.find_iter(&buffer) {
-                    let start = mat.start();
-                    let value = scan_request.pattern.clone();
-                    let mut global_positions = GLOBAL_POSITIONS.write().unwrap();
-                    global_positions.push((start_address + start, value));
-                }
             }
         }
-        let st_end_time = st_start_time.elapsed();
-        println!("Single Thread time: {:?}", st_end_time);
-        */
 
-        // let mt_start_time = Instant::now();
-        // Loop through the address ranges
         let thread_results: Vec<Vec<(usize, String)>> = scan_request
             .address_ranges
             .par_iter()
@@ -290,47 +231,65 @@ pub async fn memory_scan_handler(
             })
             .collect();
 
-        // let mt_end_time = mt_start_time.elapsed();
-        // println!("Multi Thread time: {:?}", mt_end_time);
         let flattened_results: Vec<(usize, String)> =
             thread_results.into_iter().flatten().collect();
         {
             let mut global_positions = GLOBAL_POSITIONS.write().unwrap();
-            global_positions.extend(flattened_results);
+            if let Some(positions) = global_positions.get_mut(&scan_request.scan_id) {
+                positions.extend(flattened_results);
+            } else {
+                global_positions.insert(scan_request.scan_id.clone(), flattened_results);
+            }
         }
 
         if scan_request.return_as_json {
             let global_positions = GLOBAL_POSITIONS.read().unwrap();
-            let matched_addresses: Vec<serde_json::Value> = global_positions
-                .clone()
-                .into_iter()
-                .map(|(address, value)| {
-                    json!({
-                        "address": address,
-                        "value": value
+            if let Some(positions) = global_positions.get(&scan_request.scan_id) {
+                let matched_addresses: Vec<serde_json::Value> = positions
+                    .clone()
+                    .into_iter()
+                    .map(|(address, value)| {
+                        json!({
+                            "address": address,
+                            "value": value
+                        })
                     })
-                })
-                .collect();
-            let count = global_positions.len();
-            let result = json!({
-                "matched_addresses": matched_addresses,
-                "found":count
-            });
-            let result_string = result.to_string();
-            let response = Response::builder()
-                .header("Content-Type", "application/json")
-                .body(hyper::Body::from(result_string))
-                .unwrap();
-            Ok(response)
+                    .collect();
+                let count = positions.len();
+                let result = json!({
+                    "matched_addresses": matched_addresses,
+                    "found":count
+                });
+                let result_string = result.to_string();
+                let response = Response::builder()
+                    .header("Content-Type", "application/json")
+                    .body(hyper::Body::from(result_string))
+                    .unwrap();
+                Ok(response)
+            } else {
+                let response = Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(hyper::Body::from("Unknown error"))
+                    .unwrap();
+                Ok(response)
+            }
         } else {
             let global_positions = GLOBAL_POSITIONS.read().unwrap();
-            let count = global_positions.len();
-            let result_string = json!({ "found": count }).to_string();
-            let response = Response::builder()
-                .header("Content-Type", "application/json")
-                .body(hyper::Body::from(result_string))
-                .unwrap();
-            Ok(response)
+            if let Some(positions) = global_positions.get(&scan_request.scan_id) {
+                let count = positions.len();
+                let result_string = json!({ "found": count }).to_string();
+                let response = Response::builder()
+                    .header("Content-Type", "application/json")
+                    .body(hyper::Body::from(result_string))
+                    .unwrap();
+                Ok(response)
+            } else {
+                let response = Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(hyper::Body::from("Unknown error"))
+                    .unwrap();
+                Ok(response)
+            }
         }
     } else {
         let response = Response::builder()
@@ -346,6 +305,7 @@ pub struct MemoryFilterRequest {
     pattern: String,
     is_regex: bool,
     return_as_json: bool,
+    scan_id: String,
 }
 
 pub async fn memory_filter_handler(
@@ -357,54 +317,62 @@ pub async fn memory_filter_handler(
     if let Some(pid) = *pid {
         let mut new_positions = Vec::new();
         let mut global_positions = GLOBAL_POSITIONS.write().unwrap();
-
-        for (address, value) in global_positions.iter() {
-            let mut buffer: Vec<u8> = vec![0; (value.len() / 2) as usize];
-            let _nread = match read_process_memory(
-                pid,
-                *address as *mut libc::c_void,
-                filter_request.pattern.len(),
-                &mut buffer,
-            ) {
-                Ok(nread) => nread,
-                Err(err) => -1,
-            };
-
-            if _nread == -1 {
-                continue;
-            }
-
-            if filter_request.is_regex {
-                let regex_pattern = &filter_request.pattern;
-                let re = match Regex::new(regex_pattern) {
-                    Ok(re) => re,
-                    Err(_) => continue,
+        if let Some(positions) = global_positions.get(&filter_request.scan_id) {
+            for (address, value) in positions.iter() {
+                let mut buffer: Vec<u8> = vec![0; (value.len() / 2) as usize];
+                let _nread = match read_process_memory(
+                    pid,
+                    *address as *mut libc::c_void,
+                    filter_request.pattern.len(),
+                    &mut buffer,
+                ) {
+                    Ok(nread) => nread,
+                    Err(err) => -1,
                 };
-                if re.is_match(&buffer) {
-                    new_positions.push((*address, hex::encode(&buffer)));
+
+                if _nread == -1 {
+                    continue;
                 }
-            } else {
-                let result = hex::decode(&filter_request.pattern);
-                let bytes = match result {
-                    Ok(bytes) => bytes,
-                    Err(_) => {
-                        let response = Response::builder()
-                            .status(StatusCode::BAD_REQUEST)
-                            .body(hyper::Body::from("Invalid hex pattern"))
-                            .unwrap();
-                        return Ok(response);
+
+                if filter_request.is_regex {
+                    let regex_pattern = &filter_request.pattern;
+                    let re = match Regex::new(regex_pattern) {
+                        Ok(re) => re,
+                        Err(_) => continue,
+                    };
+                    if re.is_match(&buffer) {
+                        new_positions.push((*address, hex::encode(&buffer)));
                     }
-                };
-                if buffer == bytes {
-                    new_positions.push((*address, hex::encode(&buffer)));
+                } else {
+                    let result = hex::decode(&filter_request.pattern);
+                    let bytes = match result {
+                        Ok(bytes) => bytes,
+                        Err(_) => {
+                            let response = Response::builder()
+                                .status(StatusCode::BAD_REQUEST)
+                                .body(hyper::Body::from("Invalid hex pattern"))
+                                .unwrap();
+                            return Ok(response);
+                        }
+                    };
+                    if buffer == bytes {
+                        new_positions.push((*address, hex::encode(&buffer)));
+                    }
                 }
             }
+        } else {
+            let response = Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(Body::from("Scanid not found"))
+                .unwrap();
+            return Ok(response);
         }
 
-        *global_positions = new_positions;
+        global_positions.insert(filter_request.scan_id.clone(), new_positions.clone());
 
         if filter_request.return_as_json {
-            let matched_addresses: Vec<serde_json::Value> = global_positions
+            let matched_addresses: Vec<serde_json::Value> = new_positions
+                .clone()
                 .iter()
                 .map(|(address, value)| {
                     json!({
@@ -413,7 +381,7 @@ pub async fn memory_filter_handler(
                     })
                 })
                 .collect();
-            let count = global_positions.len();
+            let count = new_positions.len();
             let result = json!({
                 "matched_addresses": matched_addresses,
                 "found":count
@@ -425,7 +393,7 @@ pub async fn memory_filter_handler(
                 .unwrap();
             Ok(response)
         } else {
-            let count = global_positions.len();
+            let count = new_positions.len();
             let result_string = json!({ "found": count }).to_string();
             let response = Response::builder()
                 .header("Content-Type", "application/json")

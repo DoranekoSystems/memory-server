@@ -1202,6 +1202,7 @@ version = "0.1.0"
 dependencies = [
  "aho-corasick 0.7.20",
  "async-std",
+ "byteorder",
  "cc",
  "hex",
  "hyper",

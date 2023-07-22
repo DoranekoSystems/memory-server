@@ -58,14 +58,17 @@ def get_address_ranges(protection):
         return False
 
 
-def find(pattern, address_ranges, is_regex=False, return_as_json=False):
+# scan_type:[int8,uint8,int16,uint16,int32,uint32,int64,uint64,float,double,utf-8,utf-16,aob,regex]
+
+
+def find(pattern, address_ranges, scan_type, return_as_json=False):
     memory_scan_url = f"{base_url}/memoryscan"
     memory_scan_payload = {
         "pattern": pattern,
         "address_ranges": address_ranges,
-        "is_regex": is_regex,
-        "return_as_json": return_as_json,
+        "scan_type": scan_type,
         "scan_id": "Scan 1",
+        "return_as_json": return_as_json,
     }
 
     start = time.time()
@@ -83,13 +86,18 @@ def find(pattern, address_ranges, is_regex=False, return_as_json=False):
         return False
 
 
-def filter(pattern, is_regex=False, return_as_json=False):
+# scan_type:[int8,uint8,int16,uint16,int32,uint32,int64,uint64,float,double,utf-8,utf-16,aob,regex]
+# filter_method:[exact,changed,unchanged,bigger,smaller]
+
+
+def filter(pattern, scan_type, filter_method, return_as_json=False):
     memory_filter_url = f"{base_url}/memoryfilter"
     memory_filter_payload = {
         "pattern": pattern,
-        "is_regex": is_regex,
-        "return_as_json": return_as_json,
+        "scan_type": scan_type,
         "scan_id": "Scan 1",
+        "filter_method": filter_method,
+        "return_as_json": return_as_json,
     }
 
     start = time.time()
@@ -114,7 +122,7 @@ if openprocess(pid) != False:
     address_ranges = get_address_ranges("rw")
     # Find url as regex
     url_regex = "https?://[\w/:%#\$&\?\(\)~\.=\+\-]+"
-    ret = find(url_regex, address_ranges, True, True)
+    ret = find(url_regex, address_ranges, "regex", True)
     if ret != False:
         print(f"found:{ret['found']}")
         for r in ret["matched_addresses"]:
@@ -124,8 +132,13 @@ if openprocess(pid) != False:
     value = input(">input integer number:")
     pattern = int.to_bytes(int(value), 4, "little").hex()
 
-    ret = find(pattern, address_ranges)
+    ret = find(pattern, address_ranges, "int32")
     if ret != False:
         value = input(">next:input integer number:")
         pattern = int.to_bytes(int(value), 4, "little").hex()
-        filter(pattern)
+        filter(pattern, "int32", "exact")
+
+    # Find utf-8 value
+    value = input(">input utf-8 string:")
+    patttern = value.encode()
+    ret = find(pattern, address_ranges, "utf-8")

@@ -1,6 +1,7 @@
 use crate::util;
 use crate::util::binary_search;
 use aho_corasick::AhoCorasick;
+use byteorder::{ByteOrder, LittleEndian};
 use hex;
 use lazy_static::lazy_static;
 use libc::{self, c_char, c_int, c_long, c_void, off_t, O_RDONLY};
@@ -14,12 +15,12 @@ use std::ffi::CString;
 use std::fs::File;
 use std::io::Error;
 use std::io::{BufRead, BufReader};
+use std::str;
 use std::sync::RwLock;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use warp::hyper::Body;
 use warp::{http::Response, http::StatusCode, Filter, Rejection, Reply};
-
 #[link(name = "native", kind = "static")]
 extern "C" {
     fn enumprocess_native(count: *mut usize) -> *mut ProcessInfo;
@@ -162,9 +163,9 @@ pub async fn write_memory_handler(
 pub struct MemoryScanRequest {
     pattern: String,
     address_ranges: Vec<(usize, usize)>,
-    is_regex: bool,
-    return_as_json: bool,
+    scan_type: String,
     scan_id: String,
+    return_as_json: bool,
 }
 
 pub async fn memory_scan_handler(
@@ -201,7 +202,7 @@ pub async fn memory_scan_handler(
                 };
 
                 if _nread != -1 {
-                    if scan_request.is_regex {
+                    if scan_request.scan_type == "regex" {
                         let regex_pattern = &scan_request.pattern;
                         let re = match Regex::new(regex_pattern) {
                             Ok(re) => re,
@@ -300,12 +301,25 @@ pub async fn memory_scan_handler(
     }
 }
 
+macro_rules! compare_values {
+    ($val:expr, $old_val:expr, $filter_method:expr) => {
+        match $filter_method {
+            "changed" => $val != $old_val,
+            "unchanged" => $val == $old_val,
+            "bigger" => $val > $old_val,
+            "smaller" => $val < $old_val,
+            _ => false,
+        }
+    };
+}
+
 #[derive(Deserialize)]
 pub struct MemoryFilterRequest {
     pattern: String,
-    is_regex: bool,
-    return_as_json: bool,
+    scan_type: String,
     scan_id: String,
+    filter_method: String,
+    return_as_json: bool,
 }
 
 pub async fn memory_filter_handler(
@@ -318,47 +332,217 @@ pub async fn memory_filter_handler(
         let mut new_positions = Vec::new();
         let mut global_positions = GLOBAL_POSITIONS.write().unwrap();
         if let Some(positions) = global_positions.get(&filter_request.scan_id) {
-            for (address, value) in positions.iter() {
-                let mut buffer: Vec<u8> = vec![0; (value.len() / 2) as usize];
-                let _nread = match read_process_memory(
-                    pid,
-                    *address as *mut libc::c_void,
-                    filter_request.pattern.len(),
-                    &mut buffer,
-                ) {
-                    Ok(nread) => nread,
-                    Err(err) => -1,
-                };
-
-                if _nread == -1 {
-                    continue;
-                }
-
-                if filter_request.is_regex {
-                    let regex_pattern = &filter_request.pattern;
-                    let re = match Regex::new(regex_pattern) {
-                        Ok(re) => re,
-                        Err(_) => continue,
+            let results: Result<Vec<_>, _> = positions
+                .par_iter()
+                .map(|(address, value)| {
+                    let mut buffer: Vec<u8> = vec![0; (value.len() / 2) as usize];
+                    let _nread = match read_process_memory(
+                        pid,
+                        *address as *mut libc::c_void,
+                        filter_request.pattern.len(),
+                        &mut buffer,
+                    ) {
+                        Ok(nread) => nread,
+                        Err(err) => -1,
                     };
-                    if re.is_match(&buffer) {
-                        new_positions.push((*address, hex::encode(&buffer)));
+
+                    if _nread == -1 {
+                        return Ok(None);
                     }
-                } else {
-                    let result = hex::decode(&filter_request.pattern);
-                    let bytes = match result {
-                        Ok(bytes) => bytes,
-                        Err(_) => {
-                            let response = Response::builder()
-                                .status(StatusCode::BAD_REQUEST)
-                                .body(hyper::Body::from("Invalid hex pattern"))
-                                .unwrap();
-                            return Ok(response);
+
+                    if filter_request.scan_type == "regex" {
+                        let regex_pattern = &filter_request.pattern;
+                        let re = match Regex::new(regex_pattern) {
+                            Ok(re) => re,
+                            Err(_) => return Ok(None),
+                        };
+                        if re.is_match(&buffer) {
+                            return Ok(Some((*address, hex::encode(&buffer))));
                         }
-                    };
-                    if buffer == bytes {
-                        new_positions.push((*address, hex::encode(&buffer)));
+                    } else {
+                        if filter_request.filter_method == "exact" {
+                            let result = hex::decode(&filter_request.pattern);
+                            let bytes = match result {
+                                Ok(bytes) => bytes,
+                                Err(_) => {
+                                    let response = Response::builder()
+                                        .status(StatusCode::BAD_REQUEST)
+                                        .body(hyper::Body::from("Invalid hex pattern"))
+                                        .unwrap();
+                                    return Err(response);
+                                }
+                            };
+                            if buffer == bytes {
+                                return Ok(Some((*address, hex::encode(&buffer))));
+                            }
+                        } else {
+                            let result = hex::decode(&value);
+                            let bytes = match result {
+                                Ok(bytes) => bytes,
+                                Err(_) => {
+                                    let response = Response::builder()
+                                        .status(StatusCode::BAD_REQUEST)
+                                        .body(hyper::Body::from("Invalid hex pattern"))
+                                        .unwrap();
+                                    return Err(response);
+                                }
+                            };
+                            let mut pass_filter = false;
+
+                            pass_filter = match filter_request.scan_type.as_str() {
+                                "int8" => {
+                                    let old_val = i8::from_le_bytes(bytes.try_into().unwrap());
+                                    let val = i8::from_le_bytes(buffer.clone().try_into().unwrap());
+                                    compare_values!(
+                                        val,
+                                        old_val,
+                                        filter_request.filter_method.as_str()
+                                    )
+                                }
+                                "uint8" => {
+                                    let old_val = u8::from_le_bytes(bytes.try_into().unwrap());
+                                    let val = u8::from_le_bytes(buffer.clone().try_into().unwrap());
+                                    compare_values!(
+                                        val,
+                                        old_val,
+                                        filter_request.filter_method.as_str()
+                                    )
+                                }
+                                "int16" => {
+                                    let old_val = i16::from_le_bytes(bytes.try_into().unwrap());
+                                    let val =
+                                        i16::from_le_bytes(buffer.clone().try_into().unwrap());
+                                    compare_values!(
+                                        val,
+                                        old_val,
+                                        filter_request.filter_method.as_str()
+                                    )
+                                }
+                                "uint16" => {
+                                    let old_val = u16::from_le_bytes(bytes.try_into().unwrap());
+                                    let val =
+                                        u16::from_le_bytes(buffer.clone().try_into().unwrap());
+                                    compare_values!(
+                                        val,
+                                        old_val,
+                                        filter_request.filter_method.as_str()
+                                    )
+                                }
+                                "int32" => {
+                                    let old_val = i32::from_le_bytes(bytes.try_into().unwrap());
+                                    let val =
+                                        i32::from_le_bytes(buffer.clone().try_into().unwrap());
+                                    compare_values!(
+                                        val,
+                                        old_val,
+                                        filter_request.filter_method.as_str()
+                                    )
+                                }
+                                "uint32" => {
+                                    let old_val = u32::from_le_bytes(bytes.try_into().unwrap());
+                                    let val =
+                                        u32::from_le_bytes(buffer.clone().try_into().unwrap());
+                                    compare_values!(
+                                        val,
+                                        old_val,
+                                        filter_request.filter_method.as_str()
+                                    )
+                                }
+                                "int64" => {
+                                    let old_val = i64::from_le_bytes(bytes.try_into().unwrap());
+                                    let val =
+                                        i64::from_le_bytes(buffer.clone().try_into().unwrap());
+                                    compare_values!(
+                                        val,
+                                        old_val,
+                                        filter_request.filter_method.as_str()
+                                    )
+                                }
+                                "uint64" => {
+                                    let old_val = u64::from_le_bytes(bytes.try_into().unwrap());
+                                    let val =
+                                        u64::from_le_bytes(buffer.clone().try_into().unwrap());
+                                    compare_values!(
+                                        val,
+                                        old_val,
+                                        filter_request.filter_method.as_str()
+                                    )
+                                }
+                                "float" => {
+                                    let old_val = LittleEndian::read_f32(&bytes);
+                                    let val = LittleEndian::read_f32(&buffer.clone());
+                                    compare_values!(
+                                        val,
+                                        old_val,
+                                        filter_request.filter_method.as_str()
+                                    )
+                                }
+                                "double" => {
+                                    let old_val = LittleEndian::read_f64(&bytes);
+                                    let val = LittleEndian::read_f64(&buffer.clone());
+                                    compare_values!(
+                                        val,
+                                        old_val,
+                                        filter_request.filter_method.as_str()
+                                    )
+                                }
+                                "utf-8" => {
+                                    let old_val = str::from_utf8(&bytes).unwrap_or("");
+                                    let val = str::from_utf8(&buffer).unwrap_or("");
+                                    match filter_request.filter_method.as_str() {
+                                        "changed" => val != old_val,
+                                        "unchanged" => val == old_val,
+                                        _ => false,
+                                    }
+                                }
+                                "utf-16" => {
+                                    let buffer_u16: Vec<u16> = buffer
+                                        .clone()
+                                        .chunks_exact(2)
+                                        .map(|b| u16::from_ne_bytes([b[0], b[1]]))
+                                        .collect();
+                                    match filter_request.filter_method.as_str() {
+                                        "changed" => {
+                                            let old_value: Vec<u16> = hex::decode(&value)
+                                                .unwrap()
+                                                .chunks_exact(2)
+                                                .map(|b| u16::from_ne_bytes([b[0], b[1]]))
+                                                .collect();
+                                            buffer_u16 != old_value
+                                        }
+                                        "unchanged" => {
+                                            let old_value: Vec<u16> = hex::decode(&value)
+                                                .unwrap()
+                                                .chunks_exact(2)
+                                                .map(|b| u16::from_ne_bytes([b[0], b[1]]))
+                                                .collect();
+                                            buffer_u16 == old_value
+                                        }
+                                        _ => false,
+                                    }
+                                }
+                                "aob" => match filter_request.filter_method.as_str() {
+                                    "changed" => buffer != bytes,
+                                    "unchanged" => buffer == bytes,
+                                    _ => false,
+                                },
+                                _ => false,
+                            };
+
+                            if pass_filter {
+                                return Ok(Some((*address, hex::encode(&buffer))));
+                            }
+                        }
                     }
+                    Ok(None)
+                })
+                .collect();
+
+            match results {
+                Ok(results) => {
+                    new_positions = results.into_iter().filter_map(|x| x).collect();
                 }
+                Err(response) => return Ok(response),
             }
         } else {
             let response = Response::builder()

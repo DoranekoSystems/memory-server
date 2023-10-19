@@ -2,6 +2,24 @@
 
 High-Speed Memory Scanner &amp; Analyzer with REST API.
 
+# Build
+
+## Android
+
+Set NDK/toolchains/llvm/prebuild/{os_specific}/bin as environment variable NDK_BIN_PATH.
+
+```sh
+./build.sh --target android
+```
+
+## iOS
+
+A Mac is required for build.
+
+```sh
+./build.sh --target ios
+```
+
 # Usage
 
 ## iOS

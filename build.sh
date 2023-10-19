@@ -4,10 +4,10 @@ if [ "$1" == "--target" ]; then
     if [ "$2" == "android" ]; then
         # aarch64
         TARGET=aarch64-linux-android
-        TARGET_CC=build/NDK/arm64/bin/aarch64-linux-android-clang
-        TARGET_CXX=build/NDK/arm64/bin/aarch64-linux-android-clang++
-        TARGET_AR=build/NDK/arm64/bin/llvm-ar
-        TARGET_LINKER=build/NDK/arm64/bin/aarch64-linux-android-clang
+        TARGET_CC=$NDK_BIN_PATH/aarch64-linux-android33-clang
+        TARGET_CXX=$NDK_BIN_PATH/aarch64-linux-android33-clang++
+        TARGET_AR=$NDK_BIN_PATH/llvm-ar
+        TARGET_LINKER=$NDK_BIN_PATH/aarch64-linux-android33-clang
 
         sudo CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$TARGET_LINKER \
              TARGET_AR=$TARGET_AR \
@@ -17,10 +17,10 @@ if [ "$1" == "--target" ]; then
 
         # armv7
         TARGET=armv7-linux-androideabi
-        TARGET_CC=build/NDK/arm/bin/arm-linux-androideabi-clang
-        TARGET_CXX=build/NDK/arm/bin/arm-linux-androideabi-clang++
-        TARGET_AR=build/NDK/arm/bin/llvm-ar
-        TARGET_LINKER=build/NDK/arm/bin/arm-linux-androideabi-clang
+        TARGET_CC=$NDK_BIN_PATH/armv7a-linux-androideabi33-clang
+        TARGET_CXX=$NDK_BIN_PATH/armv7a-linux-androideabi33-clang++
+        TARGET_AR=$NDK_BIN_PATH/llvm-ar
+        TARGET_LINKER=$NDK_BIN_PATH/armv7a-linux-androideabi33-clang
 
         sudo CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER=$TARGET_LINKER \
              TARGET_AR=$TARGET_AR \
@@ -30,12 +30,25 @@ if [ "$1" == "--target" ]; then
 
         # x86
         TARGET=i686-linux-android
-        TARGET_CC=build/NDK/x86/bin/i686-linux-android-clang
-        TARGET_CXX=build/NDK/x86/bin/i686-linux-android-clang++
-        TARGET_AR=build/NDK/x86/bin/llvm-ar
-        TARGET_LINKER=build/NDK/x86/bin/i686-linux-android-clang
+        TARGET_CC=$NDK_BIN_PATH/i686-linux-android33-clang
+        TARGET_CXX=$NDK_BIN_PATH/i686-linux-android33-clang++
+        TARGET_AR=$NDK_BIN_PATH/llvm-ar
+        TARGET_LINKER=$NDK_BIN_PATH/i686-linux-android33-clang
 
         sudo CARGO_TARGET_I686_LINUX_ANDROID_LINKER=$TARGET_LINKER \
+             TARGET_AR=$TARGET_AR \
+             TARGET_CC=$TARGET_CC \
+             TARGET_CXX=$TARGET_CXX \
+             cargo build --target=$TARGET --release
+
+        # x86_64
+        TARGET=x86_64-linux-android
+        TARGET_CC=$NDK_BIN_PATH/x86_64-linux-android33-clang
+        TARGET_CXX=$NDK_BIN_PATH/x86_64-linux-android33-clang++
+        TARGET_AR=$NDK_BIN_PATH/llvm-ar
+        TARGET_LINKER=$NDK_BIN_PATH/x86_64-linux-android33-clang
+
+        sudo CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER=$TARGET_LINKER \
              TARGET_AR=$TARGET_AR \
              TARGET_CC=$TARGET_CC \
              TARGET_CXX=$TARGET_CXX \

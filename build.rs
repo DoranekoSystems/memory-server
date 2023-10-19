@@ -33,6 +33,10 @@ fn main() {
             println!("cargo:rustc-cfg=TARGET_IS_ANDROID");
             build.file("src/cpp/src/native_linux.cpp");
         }
+        "linux" => {
+            build.cpp(true);
+            build.file("src/cpp/src/native_linux.cpp");
+        }
         _ => {
             panic!("Unsupported target OS");
         }

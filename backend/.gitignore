@@ -1,0 +1,9 @@
+.DS_Store
+
+target
+
+build/NDK/arm64
+build/NDK/arm
+build/NDK/x86
+
+vc140.pdb

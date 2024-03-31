@@ -7,7 +7,6 @@
 #include <stdlib.h>
 #include <sys/queue.h>
 #include <sys/sysctl.h>
-
 typedef struct {
   int pid;
   char *processname;
@@ -197,6 +196,5 @@ extern "C" ProcessInfo *enumprocess_native(size_t *count) {
     if (result != NULL) {
       free(result);
     }
-    return NULL;
   }
 }

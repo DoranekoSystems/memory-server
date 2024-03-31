@@ -643,7 +643,6 @@ pub async fn enumerate_regions_handler(
         unsafe {
             enumerate_regions_to_buffer(pid, buffer.as_mut_ptr(), buffer.len());
         }
-
         let buffer_cstring = unsafe { CString::from_vec_unchecked(buffer) };
         let buffer_string = buffer_cstring.into_string().unwrap();
         let buffer_reader = BufReader::new(buffer_string.as_bytes());
@@ -700,6 +699,14 @@ pub async fn enumerate_process_handler() -> Result<impl Reply, Rejection> {
         unsafe { libc::free(process_info_slice[i].processname as *mut libc::c_void) };
     }
 
+    // for cdylib
+    if count == 0 {
+        let pid = std::process::id();
+        json_array.push(json!({
+            "pid": pid,
+            "processname": "self".to_string()
+        }));
+    }
     let json_response = warp::reply::json(&json_array);
 
     // Don't forget to deallocate the memory allocated in C code

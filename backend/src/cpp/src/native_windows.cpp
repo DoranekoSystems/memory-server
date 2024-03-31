@@ -1,3 +1,4 @@
+#include <windows.h>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -5,7 +6,6 @@
 #include <stdio.h>
 #include <tlhelp32.h>
 #include <vector>
-#include <windows.h>
 
 typedef struct {
   int pid;
@@ -34,6 +34,28 @@ extern "C" SSIZE_T read_memory_native(int pid, uintptr_t address, size_t size,
     return -1;
   }
 }
+
+extern "C" SSIZE_T write_memory_native(int pid, void *address, size_t size, unsigned char *buffer) {
+    HANDLE processHandle = OpenProcess(PROCESS_VM_WRITE | PROCESS_VM_OPERATION, FALSE, pid);
+    if (processHandle == NULL) {
+        printf("OpenProcess failed: %lu\n", GetLastError());
+        return -1;
+    }
+
+    SIZE_T bytesWritten;
+    BOOL result = WriteProcessMemory(processHandle, address, buffer, size, &bytesWritten);
+    if (!result) {
+        printf("WriteProcessMemory failed: %lu\n", GetLastError());
+        CloseHandle(processHandle);
+        return -1;
+    }
+
+    CloseHandle(processHandle);
+
+    return bytesWritten;
+}
+
+
 
 extern "C" void enumerate_regions_to_buffer(DWORD pid, char *buffer,
                                             size_t buffer_size) {

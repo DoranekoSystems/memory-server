@@ -187,48 +187,56 @@ pub async fn memory_scan_handler(
         let thread_results: Vec<Vec<(usize, String)>> = scan_request
             .address_ranges
             .par_iter()
-            .map(|(start_address, end_address)| {
+            .flat_map(|(start_address, end_address)| {
                 let size = end_address - start_address;
-                let mut buffer: Vec<u8> = vec![0; size];
-                let mut local_positions = vec![];
-                let _nread = match read_process_memory(
-                    pid,
-                    *start_address as *mut libc::c_void,
-                    size,
-                    &mut buffer,
-                ) {
-                    Ok(nread) => nread,
-                    Err(err) => -1,
-                };
-
-                if _nread != -1 {
-                    if scan_request.scan_type == "regex" {
-                        let regex_pattern = &scan_request.pattern;
-                        let re = match Regex::new(regex_pattern) {
-                            Ok(re) => re,
-                            Err(_) => return vec![],
+                let chunk_size = 1024 * 1024 * 512; // 512MB
+                let num_chunks = (size + chunk_size - 1) / chunk_size;
+                (0..num_chunks)
+                    .map(|i| {
+                        let chunk_start = start_address + i * chunk_size;
+                        let chunk_end = std::cmp::min(chunk_start + chunk_size, *end_address);
+                        let chunk_size = chunk_end - chunk_start;
+                        let mut buffer: Vec<u8> = vec![0; chunk_size];
+                        let mut local_positions = vec![];
+                        let _nread = match read_process_memory(
+                            pid,
+                            chunk_start as *mut libc::c_void,
+                            chunk_size,
+                            &mut buffer,
+                        ) {
+                            Ok(nread) => nread,
+                            Err(err) => -1,
                         };
-                        for cap in re.captures_iter(&buffer) {
-                            let start = cap.get(0).unwrap().start();
-                            let end = cap.get(0).unwrap().end();
-                            let value = hex::encode(&buffer[start..end]);
-                            local_positions.push((*start_address + start, value));
+                        if _nread != -1 {
+                            if scan_request.scan_type == "regex" {
+                                let regex_pattern = &scan_request.pattern;
+                                let re = match Regex::new(regex_pattern) {
+                                    Ok(re) => re,
+                                    Err(_) => return vec![],
+                                };
+                                for cap in re.captures_iter(&buffer) {
+                                    let start = cap.get(0).unwrap().start();
+                                    let end = cap.get(0).unwrap().end();
+                                    let value = hex::encode(&buffer[start..end]);
+                                    local_positions.push((chunk_start + start, value));
+                                }
+                            } else {
+                                let result = hex::decode(&scan_request.pattern);
+                                let bytes = match result {
+                                    Ok(bytes) => bytes,
+                                    Err(_) => return vec![],
+                                };
+                                let ac = AhoCorasick::new_auto_configured(&[bytes.clone()]);
+                                for mat in ac.find_iter(&buffer) {
+                                    let start = mat.start();
+                                    let value = scan_request.pattern.clone();
+                                    local_positions.push((chunk_start + start, value));
+                                }
+                            }
                         }
-                    } else {
-                        let result = hex::decode(&scan_request.pattern);
-                        let bytes = match result {
-                            Ok(bytes) => bytes,
-                            Err(_) => return vec![],
-                        };
-                        let ac = AhoCorasick::new_auto_configured(&[bytes.clone()]);
-                        for mat in ac.find_iter(&buffer) {
-                            let start = mat.start();
-                            let value = scan_request.pattern.clone();
-                            local_positions.push((*start_address + start, value));
-                        }
-                    }
-                }
-                local_positions
+                        local_positions
+                    })
+                    .collect::<Vec<_>>()
             })
             .collect();
 

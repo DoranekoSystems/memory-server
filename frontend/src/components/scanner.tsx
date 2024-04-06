@@ -1,5 +1,6 @@
 import axios from "axios";
 import { useState, useEffect } from "react";
+import { useStore } from "./global-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -21,7 +22,27 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-const base_url = "http://localhost:3030"; // Set the appropriate backend URL
+const TriStateCheckbox = ({ id, label, defaultState, onStateChange }) => {
+  const [state, setState] = useState(defaultState);
+
+  const handleClick = () => {
+    const newState = (state + 1) % 3;
+    setState(newState);
+    onStateChange(newState);
+  };
+
+  return (
+    <div className="flex items-center space-x-2">
+      <div
+        className={`w-4 h-4 border border-gray-300 rounded-sm cursor-pointer ${
+          state === 1 ? "bg-gray-300" : state === 2 ? "bg-blue-500" : ""
+        }`}
+        onClick={handleClick}
+      />
+      <Label htmlFor={id}>{label}</Label>
+    </div>
+  );
+};
 
 export function Scanner() {
   const [addressRanges, setAddressRanges] = useState<[bigint, bigint][]>([
@@ -30,18 +51,206 @@ export function Scanner() {
   const [scanResults, setScanResults] = useState<any[]>([]);
   const [scanValue, setScanValue] = useState("0");
   const [scanType, setScanType] = useState("int32");
-  const [protection, setProtection] = useState<string[]>(["r", "w"]);
+  const [filterType, setFilterType] = useState("exact");
+  const [protection, setProtection] = useState<string>("r+w*x-");
+  const [isLoading, setIsLoading] = useState(false);
+  const [isFinding, setIsFinding] = useState(false);
+  const [isFiltering, setIsFiltering] = useState(false);
+  const ipAddress = useStore((state) => state.ipAddress);
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {}, [scanResults]);
+  useEffect(() => {
+    setLoading(false);
+  }, [loading, scanResults]);
+
+  const convertFromLittleEndianHex = (hex: string, type: string) => {
+    const buffer = new ArrayBuffer(hex.length / 2);
+    const view = new DataView(buffer);
+
+    hex.match(/.{1,2}/g)?.forEach((byte, i) => {
+      view.setUint8(i, parseInt(byte, 16));
+    });
+
+    switch (type) {
+      case "int8":
+        return view.getInt8(0);
+      case "uint8":
+        return view.getUint8(0);
+      case "int16":
+        return view.getInt16(0, true);
+      case "uint16":
+        return view.getUint16(0, true);
+      case "int32":
+        return view.getInt32(0, true);
+      case "uint32":
+        return view.getUint32(0, true);
+      case "int64":
+        return view.getBigInt64(0, true).toString();
+      case "uint64":
+        return view.getBigUint64(0, true).toString();
+      case "float":
+        return view.getFloat32(0, true);
+      case "double":
+        return view.getFloat64(0, true);
+      case "utf-8":
+        return new TextDecoder().decode(view);
+      case "utf-16":
+        const utf16 = new Uint16Array(buffer);
+        return String.fromCharCode.apply(null, Array.from(utf16));
+      case "aob":
+      case "regex":
+        return hex;
+      default:
+        return hex;
+    }
+  };
+
+  const convertToLittleEndianHex = (value: string, type: string) => {
+    let buffer: ArrayBuffer;
+    let view: DataView;
+
+    switch (type) {
+      case "int8":
+        buffer = new ArrayBuffer(1);
+        view = new DataView(buffer);
+        view.setInt8(0, parseInt(value, 10));
+        break;
+      case "uint8":
+        buffer = new ArrayBuffer(1);
+        view = new DataView(buffer);
+        view.setUint8(0, parseInt(value, 10));
+        break;
+      case "int16":
+        buffer = new ArrayBuffer(2);
+        view = new DataView(buffer);
+        view.setInt16(0, parseInt(value, 10), true);
+        break;
+      case "uint16":
+        buffer = new ArrayBuffer(2);
+        view = new DataView(buffer);
+        view.setUint16(0, parseInt(value, 10), true);
+        break;
+      case "int32":
+        buffer = new ArrayBuffer(4);
+        view = new DataView(buffer);
+        view.setInt32(0, parseInt(value, 10), true);
+        break;
+      case "uint32":
+        buffer = new ArrayBuffer(4);
+        view = new DataView(buffer);
+        view.setUint32(0, parseInt(value, 10), true);
+        break;
+      case "int64":
+        buffer = new ArrayBuffer(8);
+        view = new DataView(buffer);
+        view.setBigInt64(0, BigInt(value), true);
+        break;
+      case "uint64":
+        buffer = new ArrayBuffer(8);
+        view = new DataView(buffer);
+        view.setBigUint64(0, BigInt(value), true);
+        break;
+      case "float":
+        buffer = new ArrayBuffer(4);
+        view = new DataView(buffer);
+        view.setFloat32(0, parseFloat(value), true);
+        break;
+      case "double":
+        buffer = new ArrayBuffer(8);
+        view = new DataView(buffer);
+        view.setFloat64(0, parseFloat(value), true);
+        break;
+      case "utf-8":
+        return Array.from(new TextEncoder().encode(value))
+          .map((charCode) => charCode.toString(16).padStart(2, "0"))
+          .join("");
+      case "utf-16":
+        const utf16 = new Uint16Array(new TextEncoder().encode(value).buffer);
+        return Array.from(utf16)
+          .map((b) => b.toString(16).padStart(4, "0"))
+          .join(" ");
+      case "aob":
+      case "regex":
+        return value;
+      default:
+        return value;
+    }
+
+    return Array.from(new Uint8Array(buffer))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  };
 
   const getMemoryRegions = async (protection: string[]) => {
     try {
-      const response = await axios.get(`${base_url}/enumregions`);
+      const response = await axios.get(`http://${ipAddress}:3030/enumregions`);
       if (response.status === 200) {
         const regions = response.data.regions;
-        const filteredRegions = regions.filter((region: any) =>
-          protection.some((p) => region.protection.includes(p))
-        );
+        const filteredRegions = regions.filter((region: any) => {
+          const hasReadPermission = protection.includes("r+");
+          const hasWritePermission = protection.includes("w+");
+          const hasExecutePermission = protection.includes("x+");
+          const hasNegativeReadPermission = protection.includes("r-");
+          const hasNegativeWritePermission = protection.includes("w-");
+          const hasNegativeExecutePermission = protection.includes("x-");
+
+          const regionProtection = region.protection.toLowerCase();
+
+          let f1 = true;
+          let f2 = true;
+          let f3 = true;
+
+          if (regionProtection.includes("r")) {
+            if (hasReadPermission) {
+              f1 = true;
+            }
+            if (hasNegativeReadPermission) {
+              f1 = false;
+            }
+          } else {
+            if (hasReadPermission) {
+              f1 = false;
+            }
+            if (hasNegativeReadPermission) {
+              f1 = true;
+            }
+          }
+
+          if (regionProtection.includes("w")) {
+            if (hasWritePermission) {
+              f2 = true;
+            }
+            if (hasNegativeWritePermission) {
+              f2 = false;
+            }
+          } else {
+            if (hasWritePermission) {
+              f2 = false;
+            }
+            if (hasNegativeWritePermission) {
+              f2 = true;
+            }
+          }
+
+          if (regionProtection.includes("x")) {
+            if (hasExecutePermission) {
+              f3 = true;
+            }
+            if (hasNegativeExecutePermission) {
+              f3 = false;
+            }
+          } else {
+            if (hasExecutePermission) {
+              f3 = false;
+            }
+            if (hasNegativeExecutePermission) {
+              f3 = true;
+            }
+          }
+
+          return f1 && f2 && f3;
+        });
+
         return filteredRegions;
       } else {
         console.error(`Enumerate regions failed: ${response.status}`);
@@ -53,17 +262,11 @@ export function Scanner() {
     }
   };
 
-  const handleProtectionChange = (protectionType: string) => {
-    setProtection((prevProtection) => {
-      const updatedProtection = prevProtection.includes(protectionType)
-        ? prevProtection.filter((p) => p !== protectionType)
-        : [...prevProtection, protectionType];
-      return updatedProtection;
-    });
-  };
-
   const handleFind = async () => {
     try {
+      setIsLoading(true);
+      setIsFinding(true);
+      const pattern = convertToLittleEndianHex(scanValue, scanType);
       const filteredRegions = await getMemoryRegions(protection);
 
       const scanRanges = filteredRegions.map((region: any) => [
@@ -79,8 +282,8 @@ export function Scanner() {
         )
       );
 
-      const response = await axios.post(`${base_url}/memoryscan`, {
-        pattern: scanValue,
+      const response = await axios.post(`http://${ipAddress}:3030/memoryscan`, {
+        pattern: pattern,
         address_ranges: _addressRanges,
         scan_type: scanType,
         scan_id: "Scan 1",
@@ -97,26 +300,39 @@ export function Scanner() {
       }
     } catch (error) {
       console.error("Error scanning memory:", error);
+    } finally {
+      setIsLoading(false);
+      setIsFinding(false);
     }
   };
 
   const handleFilter = async () => {
     try {
-      const response = await axios.post(`${base_url}/memoryfilter`, {
-        pattern: scanValue,
-        scan_type: scanType,
-        scan_id: "Scan 1",
-        filter_method: "exact",
-        return_as_json: true,
-      });
+      setIsLoading(true);
+      setIsFiltering(true);
+      const pattern = convertToLittleEndianHex(scanValue, scanType);
+      const response = await axios.post(
+        `http://${ipAddress}:3030/memoryfilter`,
+        {
+          pattern: pattern,
+          scan_type: scanType,
+          scan_id: "Scan 1",
+          filter_method: filterType,
+          return_as_json: true,
+        }
+      );
       if (response.status === 200) {
-        setScanResults(response.data.result || []);
+        const scanResults = response.data.matched_addresses || [];
+        setScanResults(scanResults);
         console.log(`Pattern found ${response.data.found} times`);
       } else {
         console.error(`Memory filter failed: ${response.status}`);
       }
     } catch (error) {
       console.error("Error filtering memory:", error);
+    } finally {
+      setIsLoading(false);
+      setIsFiltering(false);
     }
   };
 
@@ -139,18 +355,20 @@ export function Scanner() {
             </div>
             <div className="flex flex-col space-y-2 md:flex-row md:space-x-2 md:space-y-0">
               <Button
-                className="w-full"
+                className="w-full bg-blue-700 hover:bg-blue-800 text-white"
                 variant="secondary"
                 onClick={handleFind}
+                disabled={isLoading}
               >
-                Find
+                {isFinding ? "Finding..." : "Find"}
               </Button>
               <Button
-                className="w-full"
+                className="w-full bg-green-700 hover:bg-green-800 text-white"
                 variant="secondary"
                 onClick={handleFilter}
+                disabled={isLoading}
               >
-                Filter
+                {isFiltering ? "Filtering..." : "Filter"}
               </Button>
             </div>
             <div className="space-y-2">
@@ -177,31 +395,100 @@ export function Scanner() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="filter-type">Filter Type</Label>
+              <Select value={filterType} onValueChange={setFilterType}>
+                <SelectTrigger>
+                  <SelectValue placeholder="exact" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="exact">exact</SelectItem>
+                  <SelectItem value="changed">changed</SelectItem>
+                  <SelectItem value="unchanged">unchanged</SelectItem>
+                  <SelectItem value="bigger">bigger</SelectItem>
+                  <SelectItem value="smaller">smaller</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <div className="flex flex-wrap items-center space-x-2">
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="read"
-                  checked={protection.includes("r")}
-                  onCheckedChange={() => handleProtectionChange("r")}
-                />
-                <Label htmlFor="read">Read</Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="write"
-                  checked={protection.includes("w")}
-                  onCheckedChange={() => handleProtectionChange("w")}
-                />
-                <Label htmlFor="write">Write</Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="execute"
-                  checked={protection.includes("x")}
-                  onCheckedChange={() => handleProtectionChange("x")}
-                />
-                <Label htmlFor="execute">Execute</Label>
-              </div>
+              <TriStateCheckbox
+                id="read"
+                label="Read"
+                defaultState={
+                  protection.includes("r+")
+                    ? 2
+                    : protection.includes("r-")
+                    ? 0
+                    : 1
+                }
+                onStateChange={(state) => {
+                  if (state === 0) {
+                    setProtection((prevProtection) =>
+                      prevProtection.replace("r+", "r-")
+                    );
+                  } else if (state === 1) {
+                    setProtection((prevProtection) =>
+                      prevProtection.replace("r-", "r*")
+                    );
+                  } else {
+                    setProtection((prevProtection) =>
+                      prevProtection.replace("r*", "r+")
+                    );
+                  }
+                }}
+              />
+              <TriStateCheckbox
+                id="write"
+                label="Write"
+                defaultState={
+                  protection.includes("w+")
+                    ? 2
+                    : protection.includes("w-")
+                    ? 0
+                    : 1
+                }
+                onStateChange={(state) => {
+                  if (state === 0) {
+                    setProtection((prevProtection) =>
+                      prevProtection.replace("w+", "w-")
+                    );
+                  } else if (state === 1) {
+                    setProtection((prevProtection) =>
+                      prevProtection.replace("w-", "w*")
+                    );
+                  } else {
+                    setProtection((prevProtection) =>
+                      prevProtection.replace("w*", "w+")
+                    );
+                  }
+                }}
+              />
+              <TriStateCheckbox
+                id="execute"
+                label="Execute"
+                defaultState={
+                  protection.includes("x+")
+                    ? 2
+                    : protection.includes("x-")
+                    ? 0
+                    : 1
+                }
+                onStateChange={(state) => {
+                  if (state === 0) {
+                    setProtection((prevProtection) =>
+                      prevProtection.replace("x+", "x-")
+                    );
+                  } else if (state === 1) {
+                    setProtection((prevProtection) =>
+                      prevProtection.replace("x-", "x*")
+                    );
+                  } else {
+                    setProtection((prevProtection) =>
+                      prevProtection.replace("x*", "x+")
+                    );
+                  }
+                }}
+              />
             </div>
             <div className="flex flex-col space-y-2 md:flex-row md:space-x-2 md:space-y-0">
               <Input
@@ -230,7 +517,8 @@ export function Scanner() {
           <CardHeader>
             <CardTitle className="text-2xl">Scan Data List</CardTitle>
             <p className="mt-1 text-sm text-muted-foreground">
-              Showing {scanResults.slice(0, 1000).length} of {scanResults.length} results
+              Showing {scanResults.slice(0, 1000).length} of{" "}
+              {scanResults.length} results
             </p>
           </CardHeader>
           <CardContent className="overflow-y-auto max-h-[500px]">
@@ -248,8 +536,10 @@ export function Scanner() {
                     <TableCell>{index + 1}</TableCell>
                     <TableCell>{`0x${BigInt(result.address)
                       .toString(16)
-                      .padStart(16, "0")}`}</TableCell>
-                    <TableCell>{result.value}</TableCell>
+                      .toUpperCase()}`}</TableCell>
+                    <TableCell>
+                      {convertFromLittleEndianHex(result.value, scanType)}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

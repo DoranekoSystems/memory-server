@@ -2,8 +2,8 @@ import requests
 import time
 
 ### Setting ####
-base_url = "http://192.168.11.18:3030"  # Replace with the actual URL
-target_processname = "SurvivalShooter"  # Replace with processname
+base_url = "http://localhost:3030"  # Replace with the actual URL
+target_processname = "SurvivalShooter.exe"  # Replace with processname
 
 
 def get_processid_by_name(name):

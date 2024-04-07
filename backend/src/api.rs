@@ -5,6 +5,7 @@ use byteorder::{ByteOrder, LittleEndian};
 use hex;
 use lazy_static::lazy_static;
 use libc::{self, c_char, c_int, c_long, c_void, off_t, O_RDONLY};
+use memchr::{memmem, Memchr};
 use rayon::prelude::*;
 use regex::bytes::Regex;
 use serde::{Deserialize, Serialize};
@@ -183,7 +184,6 @@ pub async fn memory_scan_handler(
             } else {
             }
         }
-
         let thread_results: Vec<Vec<(usize, String)>> = scan_request
             .address_ranges
             .par_iter()
@@ -191,29 +191,33 @@ pub async fn memory_scan_handler(
                 let size = end_address - start_address;
                 let chunk_size = 1024 * 1024 * 512; // 512MB
                 let num_chunks = (size + chunk_size - 1) / chunk_size;
+
                 (0..num_chunks)
                     .map(|i| {
                         let chunk_start = start_address + i * chunk_size;
                         let chunk_end = std::cmp::min(chunk_start + chunk_size, *end_address);
-                        let chunk_size = chunk_end - chunk_start;
-                        let mut buffer: Vec<u8> = vec![0; chunk_size];
+                        let chunk_size_actual = chunk_end - chunk_start;
+                        let mut buffer: Vec<u8> = vec![0; chunk_size_actual];
                         let mut local_positions = vec![];
-                        let _nread = match read_process_memory(
+
+                        let nread = match read_process_memory(
                             pid,
                             chunk_start as *mut libc::c_void,
-                            chunk_size,
+                            chunk_size_actual,
                             &mut buffer,
                         ) {
                             Ok(nread) => nread,
                             Err(err) => -1,
                         };
-                        if _nread != -1 {
+
+                        if nread != -1 {
                             if scan_request.scan_type == "regex" {
                                 let regex_pattern = &scan_request.pattern;
                                 let re = match Regex::new(regex_pattern) {
                                     Ok(re) => re,
                                     Err(_) => return vec![],
                                 };
+
                                 for cap in re.captures_iter(&buffer) {
                                     let start = cap.get(0).unwrap().start();
                                     let end = cap.get(0).unwrap().end();
@@ -221,19 +225,21 @@ pub async fn memory_scan_handler(
                                     local_positions.push((chunk_start + start, value));
                                 }
                             } else {
-                                let result = hex::decode(&scan_request.pattern);
-                                let bytes = match result {
+                                let search_bytes = match hex::decode(&scan_request.pattern) {
                                     Ok(bytes) => bytes,
                                     Err(_) => return vec![],
                                 };
-                                let ac = AhoCorasick::new_auto_configured(&[bytes.clone()]);
-                                for mat in ac.find_iter(&buffer) {
-                                    let start = mat.start();
+
+                                let mut buffer_offset = 0;
+                                for pos in memmem::find_iter(&buffer, &search_bytes) {
+                                    let start = chunk_start + buffer_offset + pos;
                                     let value = scan_request.pattern.clone();
-                                    local_positions.push((chunk_start + start, value));
+                                    local_positions.push((start, value));
+                                    buffer_offset += pos + 1;
                                 }
                             }
                         }
+
                         local_positions
                     })
                     .collect::<Vec<_>>()

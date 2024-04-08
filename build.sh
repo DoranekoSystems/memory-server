@@ -13,5 +13,3 @@ cd backend
 cd ..
 
 echo "Build process completed."
-
-sudo ./target/aarch64-apple-darwin/release/memory-server

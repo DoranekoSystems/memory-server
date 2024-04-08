@@ -1,1 +1,1 @@
-cargo watch -w backend -w frontend -w static -s "./build.sh --target mac"
+cargo watch -w backend -w frontend -s "./build.sh --target ios"

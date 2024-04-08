@@ -27,13 +27,20 @@ extern "C" kern_return_t
 mach_vm_region(vm_map_t, mach_vm_address_t, mach_vm_size_t, vm_region_flavor_t,
                vm_region_info_t, mach_msg_type_number_t *, mach_port_t *);
 
+extern "C" pid_t get_pid_native() { return getpid(); }
+
 extern "C" ssize_t read_memory_native(int pid, mach_vm_address_t address,
                                       mach_vm_size_t size,
                                       unsigned char *buffer) {
   mach_port_t task;
-  kern_return_t kr = task_for_pid(mach_task_self(), pid, &task);
-  if (kr != KERN_SUCCESS) {
-    return -1;
+  kern_return_t kr;
+  if (pid == getpid()) {
+    task = mach_task_self();
+  } else {
+    kr = task_for_pid(mach_task_self(), pid, &task);
+    if (kr != KERN_SUCCESS) {
+      return -1;
+    }
   }
 
   mach_vm_size_t out_size;
@@ -56,9 +63,13 @@ extern "C" ssize_t write_memory_native(int pid, mach_vm_address_t address,
   mach_msg_type_number_t info_count = VM_REGION_BASIC_INFO_COUNT_64;
   mach_port_t object_name;
 
-  err = task_for_pid(mach_task_self(), pid, &task);
-  if (err != KERN_SUCCESS) {
-    return -1;
+  if (pid == getpid()) {
+    task = mach_task_self();
+  } else {
+    err = task_for_pid(mach_task_self(), pid, &task);
+    if (err != KERN_SUCCESS) {
+      return -1;
+    }
   }
 
   // Get the current protection
@@ -99,10 +110,14 @@ extern "C" void enumerate_regions_to_buffer(pid_t pid, char *buffer,
   vm_size_t size = 0;
   natural_t depth = 1;
 
-  err = task_for_pid(mach_task_self(), pid, &task);
-  if (err != KERN_SUCCESS) {
-    snprintf(buffer, buffer_size, "Failed to get task for pid %d\n", pid);
-    return;
+  if (pid == getpid()) {
+    task = mach_task_self();
+  } else {
+    err = task_for_pid(mach_task_self(), pid, &task);
+    if (err != KERN_SUCCESS) {
+      snprintf(buffer, buffer_size, "Failed to get task for pid %d\n", pid);
+      return;
+    }
   }
 
   size_t pos = 0;

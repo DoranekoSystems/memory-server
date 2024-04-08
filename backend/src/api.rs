@@ -24,6 +24,7 @@ use warp::hyper::Body;
 use warp::{http::Response, http::StatusCode, Filter, Rejection, Reply};
 #[link(name = "native", kind = "static")]
 extern "C" {
+    fn get_pid_native() -> i32;
     fn enumprocess_native(count: *mut usize) -> *mut ProcessInfo;
     fn enumerate_regions_to_buffer(pid: i32, buffer: *mut u8, buffer_size: usize);
     fn read_memory_native(
@@ -711,20 +712,17 @@ pub async fn enumerate_process_handler() -> Result<impl Reply, Rejection> {
             "processname": process_name
         }));
         unsafe { libc::free(process_info_slice[i].processname as *mut libc::c_void) };
+        unsafe { libc::free(process_info_ptr as *mut libc::c_void) };
     }
 
     // for cdylib
     if count == 0 {
-        let pid = std::process::id();
+        let pid = unsafe { get_pid_native() };
         json_array.push(json!({
             "pid": pid,
             "processname": "self".to_string()
         }));
     }
     let json_response = warp::reply::json(&json_array);
-
-    // Don't forget to deallocate the memory allocated in C code
-    unsafe { libc::free(process_info_ptr as *mut libc::c_void) };
-
     Ok(json_response)
 }

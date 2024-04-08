@@ -25,6 +25,8 @@ typedef ssize_t (*process_vm_readv_func)(pid_t, const struct iovec *,
 static process_vm_readv_func PROCESS_VM_READV = nullptr;
 #endif
 
+extern "C" pid_t get_pid_native() { return getpid(); }
+
 extern "C" ssize_t read_memory_native(int pid, uintptr_t address, size_t size,
                                       unsigned char *buffer) {
 #ifdef TARGET_IS_ANDROID

@@ -17,7 +17,6 @@ import { Button } from "@/components/ui/button";
 import { useState, useEffect, useRef } from "react";
 import { Bold } from "lucide-react";
 import { useStore } from "./global-store";
-
 export function Setting() {
   const [openedProcess, setOpenedProcess] = useState(null);
   const ipAddress = useStore((state) => state.ipAddress);
@@ -97,6 +96,7 @@ export function Setting() {
               <Label htmlFor="ip-address">IP Address</Label>
               <Input
                 id="ip-address"
+                defaultValue={ipAddress}
                 placeholder={ipAddress}
                 required
                 type="text"

@@ -58,10 +58,59 @@ export function Scanner() {
   const [isFiltering, setIsFiltering] = useState(false);
   const ipAddress = useStore((state) => state.ipAddress);
   const [loading, setLoading] = useState(true);
+  const [selectedIndices, setSelectedIndices] = useState([]);
+  const [selectedAddresses, setSelectedAddresses] = useState([]);
+  const [patchValue, setPatchValue] = useState("");
 
   useEffect(() => {
     setLoading(false);
   }, [loading, scanResults]);
+
+  const handleSelect = (index, address) => {
+    setSelectedIndices((prevIndices) => {
+      if (prevIndices.includes(index)) {
+        return prevIndices.filter((i) => i !== index).sort((a, b) => a - b);
+      } else {
+        return [...prevIndices, index].sort((a, b) => a - b);
+      }
+    });
+    setSelectedAddresses((prevAddresses) => {
+      if (prevAddresses.includes(address)) {
+        return prevAddresses.filter((a) => a !== address);
+      } else {
+        return [...prevAddresses, address];
+      }
+    });
+  };
+
+  const handlePatchValue = (e) => {
+    setPatchValue(e.target.value);
+  };
+
+  const handlePatch = async () => {
+    const hexString = convertToLittleEndianHex(patchValue);
+
+    const buffer = new Uint8Array(
+      hexString.match(/.{1,2}/g).map((byte) => parseInt(byte, 16))
+    );
+
+    try {
+      for (const address of selectedAddresses) {
+        console.log(address);
+        await axios.post(`http://${ipAddress}:3030/writememory`, {
+          address: address,
+          buffer: Array.from(buffer),
+        });
+        console.log(
+          `Memory patched successfully for address: 0x${BigInt(address)
+            .toString(16)
+            .toUpperCase()}`
+        );
+      }
+    } catch (error) {
+      console.error("Error patching memory:", error);
+    }
+  };
 
   const convertFromLittleEndianHex = (hex: string, type: string) => {
     const buffer = new ArrayBuffer(hex.length / 2);
@@ -266,6 +315,8 @@ export function Scanner() {
     try {
       setIsLoading(true);
       setIsFinding(true);
+      setSelectedIndices([]);
+      setSelectedIndices([]);
       const pattern = convertToLittleEndianHex(scanValue, scanType);
       const filteredRegions = await getMemoryRegions(protection);
 
@@ -310,6 +361,8 @@ export function Scanner() {
     try {
       setIsLoading(true);
       setIsFiltering(true);
+      setSelectedIndices([]);
+      setSelectedIndices([]);
       const pattern = convertToLittleEndianHex(scanValue, scanType);
       const response = await axios.post(
         `http://${ipAddress}:3030/memoryfilter`,
@@ -513,7 +566,7 @@ export function Scanner() {
             </div>
           </CardContent>
         </Card>
-        <Card className="w-full max-w-4xl">
+        <Card className="w-full max-w-4xl mb-6">
           <CardHeader>
             <CardTitle className="text-2xl">Scan Data List</CardTitle>
             <p className="mt-1 text-sm text-muted-foreground">
@@ -532,11 +585,15 @@ export function Scanner() {
               </TableHeader>
               <TableBody>
                 {scanResults.slice(0, 1000).map((result, index) => (
-                  <TableRow key={index}>
+                  <TableRow
+                    key={index}
+                    selected={selectedIndices.includes(index + 1)}
+                    onSelect={() => handleSelect(index + 1, result.address)}
+                  >
                     <TableCell>{index + 1}</TableCell>
-                    <TableCell>{`0x${BigInt(result.address)
-                      .toString(16)
-                      .toUpperCase()}`}</TableCell>
+                    <TableCell>
+                      {`0x${BigInt(result.address).toString(16).toUpperCase()}`}
+                    </TableCell>
                     <TableCell>
                       {convertFromLittleEndianHex(result.value, scanType)}
                     </TableCell>
@@ -544,6 +601,23 @@ export function Scanner() {
                 ))}
               </TableBody>
             </Table>
+          </CardContent>
+        </Card>
+        <Card className="w-full max-w-4xl">
+          <CardHeader>
+            <CardTitle className="text-2xl">Memory Editor</CardTitle>
+            <p>Selected Indexes: {selectedIndices.join(", ")}</p>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center space-x-2">
+              <Input
+                type="text"
+                placeholder="Enter patch value"
+                value={patchValue}
+                onChange={handlePatchValue}
+              />
+              <Button onClick={handlePatch}>Patch</Button>
+            </div>
           </CardContent>
         </Card>
       </main>

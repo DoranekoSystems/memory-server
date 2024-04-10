@@ -712,7 +712,6 @@ pub async fn enumerate_process_handler() -> Result<impl Reply, Rejection> {
             "processname": process_name
         }));
         unsafe { libc::free(process_info_slice[i].processname as *mut libc::c_void) };
-        unsafe { libc::free(process_info_ptr as *mut libc::c_void) };
     }
 
     // for cdylib
@@ -721,7 +720,9 @@ pub async fn enumerate_process_handler() -> Result<impl Reply, Rejection> {
         json_array.push(json!({
             "pid": pid,
             "processname": "self".to_string()
-        }));
+        })); 
+    } else{
+        unsafe { libc::free(process_info_ptr as *mut libc::c_void) };
     }
     let json_response = warp::reply::json(&json_array);
     Ok(json_response)

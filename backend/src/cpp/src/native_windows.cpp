@@ -12,6 +12,8 @@ typedef struct {
   char *processname;
 } ProcessInfo;
 
+extern "C" int get_pid_native() { return GetCurrentProcessId(); }
+
 extern "C" SSIZE_T read_memory_native(int pid, uintptr_t address, size_t size,
                                       unsigned char *buffer) {
   // Open the process with read permissions

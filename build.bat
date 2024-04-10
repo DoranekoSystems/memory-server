@@ -13,6 +13,3 @@ call build.bat %ARGS%
 cd ..
 
 echo Build process completed.
-
-call target\\x86_64-pc-windows-msvc\\release\\memory-server.exe
-

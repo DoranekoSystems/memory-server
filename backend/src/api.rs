@@ -101,9 +101,10 @@ pub async fn read_memory_handler(
                 return Ok(response);
             }
             Err(_) => {
+                let empty_buffer = Vec::new();
                 let response = Response::builder()
-                    .status(StatusCode::BAD_REQUEST)
-                    .body(hyper::Body::from("ReadProcessMemory error"))
+                    .header("Content-Type", "application/octet-stream")
+                    .body(hyper::Body::from(empty_buffer))
                     .unwrap();
                 return Ok(response);
             }

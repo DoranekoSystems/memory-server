@@ -1,10 +1,11 @@
 import axios from "axios";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useStore } from "./global-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { TriStateCheckbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -22,27 +23,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-const TriStateCheckbox = ({ id, label, defaultState, onStateChange }) => {
-  const [state, setState] = useState(defaultState);
+import {
+  getByteLengthFromScanType,
+  arrayBufferToLittleEndianHexString,
+  convertFromLittleEndianHex,
+  convertToLittleEndianHex,
+} from "../lib/converter";
 
-  const handleClick = () => {
-    const newState = (state + 1) % 3;
-    setState(newState);
-    onStateChange(newState);
-  };
-
-  return (
-    <div className="flex items-center space-x-2">
-      <div
-        className={`w-4 h-4 border border-gray-300 rounded-sm cursor-pointer ${
-          state === 1 ? "bg-gray-300" : state === 2 ? "bg-blue-500" : ""
-        }`}
-        onClick={handleClick}
-      />
-      <Label htmlFor={id}>{label}</Label>
-    </div>
-  );
-};
+import { getMemoryRegions, readProcessMemory } from "../lib/api";
 
 export function Scanner() {
   const [addressRanges, setAddressRanges] = useState<[bigint, bigint][]>([
@@ -61,10 +49,63 @@ export function Scanner() {
   const [selectedIndices, setSelectedIndices] = useState([]);
   const [selectedAddresses, setSelectedAddresses] = useState([]);
   const [patchValue, setPatchValue] = useState("");
+  const tableRef = useRef(null);
 
   useEffect(() => {
-    setLoading(false);
-  }, [loading, scanResults]);
+    const updateDisplayedRows = async () => {
+      if (tableRef.current) {
+        const tableRect = tableRef.current.getBoundingClientRect();
+        const rows = tableRef.current.querySelectorAll("tbody tr");
+
+        for (let i = 0; i < rows.length; i++) {
+          const row = rows[i];
+          const rowRect = row.getBoundingClientRect();
+
+          if (rowRect.top >= tableRect.top) {
+            const startIndex = Number(row.children[0].textContent) - 1;
+            const endIndex = Math.min(startIndex + 20, scanResults.length);
+
+            for (let j = startIndex; j < endIndex; j++) {
+              const result = scanResults[j];
+              if (result) {
+                try {
+                  const memoryData = await readProcessMemory(
+                    ipAddress,
+                    result.address,
+                    getByteLengthFromScanType(scanType, result.value)
+                  );
+                  let updatedValue = "";
+                  if (memoryData == null) {
+                    updatedValue = "???????";
+                  } else {
+                    updatedValue =
+                      arrayBufferToLittleEndianHexString(memoryData);
+                  }
+                  setScanResults((prevResults) =>
+                    prevResults.map((item) =>
+                      item.address === result.address
+                        ? { ...item, value: updatedValue }
+                        : item
+                    )
+                  );
+                } catch (error) {
+                  console.error("Error updating memory value:", error);
+                }
+              }
+            }
+
+            break;
+          }
+        }
+      }
+    };
+
+    const interval = setInterval(updateDisplayedRows, 1000);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [loading, scanResults, ipAddress, scanType]);
 
   const handleSelect = (index, address) => {
     setSelectedIndices((prevIndices) => {
@@ -88,7 +129,7 @@ export function Scanner() {
   };
 
   const handlePatch = async () => {
-    const hexString = convertToLittleEndianHex(patchValue);
+    const hexString = convertToLittleEndianHex(patchValue, scanType);
 
     const buffer = new Uint8Array(
       hexString.match(/.{1,2}/g).map((byte) => parseInt(byte, 16))
@@ -96,7 +137,6 @@ export function Scanner() {
 
     try {
       for (const address of selectedAddresses) {
-        console.log(address);
         await axios.post(`http://${ipAddress}:3030/writememory`, {
           address: address,
           buffer: Array.from(buffer),
@@ -112,205 +152,6 @@ export function Scanner() {
     }
   };
 
-  const convertFromLittleEndianHex = (hex: string, type: string) => {
-    const buffer = new ArrayBuffer(hex.length / 2);
-    const view = new DataView(buffer);
-
-    hex.match(/.{1,2}/g)?.forEach((byte, i) => {
-      view.setUint8(i, parseInt(byte, 16));
-    });
-
-    switch (type) {
-      case "int8":
-        return view.getInt8(0);
-      case "uint8":
-        return view.getUint8(0);
-      case "int16":
-        return view.getInt16(0, true);
-      case "uint16":
-        return view.getUint16(0, true);
-      case "int32":
-        return view.getInt32(0, true);
-      case "uint32":
-        return view.getUint32(0, true);
-      case "int64":
-        return view.getBigInt64(0, true).toString();
-      case "uint64":
-        return view.getBigUint64(0, true).toString();
-      case "float":
-        return view.getFloat32(0, true);
-      case "double":
-        return view.getFloat64(0, true);
-      case "utf-8":
-        return new TextDecoder().decode(view);
-      case "utf-16":
-        const utf16 = new Uint16Array(buffer);
-        return String.fromCharCode.apply(null, Array.from(utf16));
-      case "aob":
-      case "regex":
-        return hex;
-      default:
-        return hex;
-    }
-  };
-
-  const convertToLittleEndianHex = (value: string, type: string) => {
-    let buffer: ArrayBuffer;
-    let view: DataView;
-
-    switch (type) {
-      case "int8":
-        buffer = new ArrayBuffer(1);
-        view = new DataView(buffer);
-        view.setInt8(0, parseInt(value, 10));
-        break;
-      case "uint8":
-        buffer = new ArrayBuffer(1);
-        view = new DataView(buffer);
-        view.setUint8(0, parseInt(value, 10));
-        break;
-      case "int16":
-        buffer = new ArrayBuffer(2);
-        view = new DataView(buffer);
-        view.setInt16(0, parseInt(value, 10), true);
-        break;
-      case "uint16":
-        buffer = new ArrayBuffer(2);
-        view = new DataView(buffer);
-        view.setUint16(0, parseInt(value, 10), true);
-        break;
-      case "int32":
-        buffer = new ArrayBuffer(4);
-        view = new DataView(buffer);
-        view.setInt32(0, parseInt(value, 10), true);
-        break;
-      case "uint32":
-        buffer = new ArrayBuffer(4);
-        view = new DataView(buffer);
-        view.setUint32(0, parseInt(value, 10), true);
-        break;
-      case "int64":
-        buffer = new ArrayBuffer(8);
-        view = new DataView(buffer);
-        view.setBigInt64(0, BigInt(value), true);
-        break;
-      case "uint64":
-        buffer = new ArrayBuffer(8);
-        view = new DataView(buffer);
-        view.setBigUint64(0, BigInt(value), true);
-        break;
-      case "float":
-        buffer = new ArrayBuffer(4);
-        view = new DataView(buffer);
-        view.setFloat32(0, parseFloat(value), true);
-        break;
-      case "double":
-        buffer = new ArrayBuffer(8);
-        view = new DataView(buffer);
-        view.setFloat64(0, parseFloat(value), true);
-        break;
-      case "utf-8":
-        return Array.from(new TextEncoder().encode(value))
-          .map((charCode) => charCode.toString(16).padStart(2, "0"))
-          .join("");
-      case "utf-16":
-        const utf16 = new Uint16Array(new TextEncoder().encode(value).buffer);
-        return Array.from(utf16)
-          .map((b) => b.toString(16).padStart(4, "0"))
-          .join(" ");
-      case "aob":
-      case "regex":
-        return value;
-      default:
-        return value;
-    }
-
-    return Array.from(new Uint8Array(buffer))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
-  };
-
-  const getMemoryRegions = async (protection: string[]) => {
-    try {
-      const response = await axios.get(`http://${ipAddress}:3030/enumregions`);
-      if (response.status === 200) {
-        const regions = response.data.regions;
-        const filteredRegions = regions.filter((region: any) => {
-          const hasReadPermission = protection.includes("r+");
-          const hasWritePermission = protection.includes("w+");
-          const hasExecutePermission = protection.includes("x+");
-          const hasNegativeReadPermission = protection.includes("r-");
-          const hasNegativeWritePermission = protection.includes("w-");
-          const hasNegativeExecutePermission = protection.includes("x-");
-
-          const regionProtection = region.protection.toLowerCase();
-
-          let f1 = true;
-          let f2 = true;
-          let f3 = true;
-
-          if (regionProtection.includes("r")) {
-            if (hasReadPermission) {
-              f1 = true;
-            }
-            if (hasNegativeReadPermission) {
-              f1 = false;
-            }
-          } else {
-            if (hasReadPermission) {
-              f1 = false;
-            }
-            if (hasNegativeReadPermission) {
-              f1 = true;
-            }
-          }
-
-          if (regionProtection.includes("w")) {
-            if (hasWritePermission) {
-              f2 = true;
-            }
-            if (hasNegativeWritePermission) {
-              f2 = false;
-            }
-          } else {
-            if (hasWritePermission) {
-              f2 = false;
-            }
-            if (hasNegativeWritePermission) {
-              f2 = true;
-            }
-          }
-
-          if (regionProtection.includes("x")) {
-            if (hasExecutePermission) {
-              f3 = true;
-            }
-            if (hasNegativeExecutePermission) {
-              f3 = false;
-            }
-          } else {
-            if (hasExecutePermission) {
-              f3 = false;
-            }
-            if (hasNegativeExecutePermission) {
-              f3 = true;
-            }
-          }
-
-          return f1 && f2 && f3;
-        });
-
-        return filteredRegions;
-      } else {
-        console.error(`Enumerate regions failed: ${response.status}`);
-        return [];
-      }
-    } catch (error) {
-      console.error("Error enumerating regions:", error);
-      return [];
-    }
-  };
-
   const handleFind = async () => {
     try {
       setIsLoading(true);
@@ -318,7 +159,7 @@ export function Scanner() {
       setSelectedIndices([]);
       setSelectedIndices([]);
       const pattern = convertToLittleEndianHex(scanValue, scanType);
-      const filteredRegions = await getMemoryRegions(protection);
+      const filteredRegions = await getMemoryRegions(ipAddress, protection);
 
       const scanRanges = filteredRegions.map((region: any) => [
         parseInt(region.start_address, 16),
@@ -343,7 +184,6 @@ export function Scanner() {
 
       if (response.status === 200) {
         const scanResults = response.data.matched_addresses || [];
-        console.log(scanResults);
         setScanResults(scanResults);
         console.log(`Pattern found ${response.data.found} times`);
       } else {
@@ -575,7 +415,7 @@ export function Scanner() {
             </p>
           </CardHeader>
           <CardContent className="overflow-y-auto max-h-[500px]">
-            <Table>
+            <Table ref={tableRef}>
               <TableHeader>
                 <TableRow>
                   <TableHead>Index</TableHead>

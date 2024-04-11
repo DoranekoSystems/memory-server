@@ -37,6 +37,19 @@ export function arrayBufferToLittleEndianHexString(
   return hexString;
 }
 
+function encodeStringToUtf16LEHex(str: string) {
+  const buffer = new ArrayBuffer(str.length * 2);
+  const view = new DataView(buffer);
+
+  for (let i = 0; i < str.length; i++) {
+    view.setUint16(i * 2, str.charCodeAt(i), true);
+  }
+
+  return Array.from(new Uint8Array(buffer))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 export function convertFromLittleEndianHex(hex: string, type: string) {
   try {
     const buffer = new ArrayBuffer(hex.length / 2);
@@ -73,8 +86,9 @@ export function convertFromLittleEndianHex(hex: string, type: string) {
         const utf16 = new Uint16Array(buffer);
         return String.fromCharCode.apply(null, Array.from(utf16));
       case "aob":
-      case "regex":
         return hex;
+      case "regex":
+        return new TextDecoder().decode(view);
       default:
         return hex;
     }
@@ -143,10 +157,7 @@ export function convertToLittleEndianHex(value: string, type: string) {
         .map((charCode) => charCode.toString(16).padStart(2, "0"))
         .join("");
     case "utf-16":
-      const utf16 = new Uint16Array(new TextEncoder().encode(value).buffer);
-      return Array.from(utf16)
-        .map((b) => b.toString(16).padStart(4, "0"))
-        .join(" ");
+      return encodeStringToUtf16LEHex(value);
     case "aob":
     case "regex":
       return value;

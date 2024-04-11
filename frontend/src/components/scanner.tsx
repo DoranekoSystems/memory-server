@@ -283,7 +283,7 @@ export function Scanner() {
                   <SelectItem value="double">double</SelectItem>
                   <SelectItem value="utf-8">utf-8</SelectItem>
                   <SelectItem value="utf-16">utf-16</SelectItem>
-                  <SelectItem value="aob">aob</SelectItem>
+                  <SelectItem value="aob">array of byte</SelectItem>
                   <SelectItem value="regex">regex</SelectItem>
                 </SelectContent>
               </Select>

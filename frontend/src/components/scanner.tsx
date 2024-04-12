@@ -129,8 +129,12 @@ export function Scanner() {
   };
 
   const handlePatch = async () => {
-    const hexString = convertToLittleEndianHex(patchValue, scanType);
-
+    let hexString = convertToLittleEndianHex(patchValue, scanType);
+    if (scanType == "regex") {
+      hexString = Array.from(new TextEncoder().encode(hexString))
+        .map((charCode) => charCode.toString(16).padStart(2, "0"))
+        .join("");
+    }
     const buffer = new Uint8Array(
       hexString.match(/.{1,2}/g).map((byte) => parseInt(byte, 16))
     );
@@ -395,7 +399,7 @@ export function Scanner() {
               />
               <Input
                 placeholder="0x7FFFFFFFFFFFFF"
-                value={addressRanges[0][1].toString(16)}
+                value={addressRanges[0][1].toString(16).toUpperCase()}
                 onChange={(e) =>
                   setAddressRanges([
                     [addressRanges[0][0], BigInt(parseInt(e.target.value, 16))],

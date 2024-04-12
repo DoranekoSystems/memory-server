@@ -59,6 +59,15 @@ async fn main() {
             api::read_memory_handler(pid_state, read_memory_request).await
         });
 
+    let read_memory_multiple = warp::path!("readmemories")
+        .and(warp::post())
+        .and(warp::body::content_length_limit(1024 * 1024 * 10)) // 10MB
+        .and(warp::body::json::<Vec<api::ReadMemoryRequest>>())
+        .and(api::with_state(pid_state.clone()))
+        .and_then(|read_memory_requests, pid_state| async move {
+            api::read_memory_multiple_handler(pid_state, read_memory_requests).await
+        });
+
     let write_memory = warp::path!("writememory")
         .and(warp::post())
         .and(warp::body::json())
@@ -88,6 +97,7 @@ async fn main() {
         .and_then(|pid_state| async move { api::enumerate_regions_handler(pid_state).await });
     let routes = open_process
         .or(read_memory)
+        .or(read_memory_multiple)
         .or(write_memory)
         .or(memory_scan)
         .or(memory_filter)

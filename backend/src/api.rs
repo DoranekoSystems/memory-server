@@ -22,6 +22,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use warp::hyper::Body;
 use warp::{http::Response, http::StatusCode, Filter, Rejection, Reply};
+use lz4;
+
 #[link(name = "native", kind = "static")]
 extern "C" {
     fn get_pid_native() -> i32;
@@ -109,6 +111,106 @@ pub async fn read_memory_handler(
                 return Ok(response);
             }
         };
+    } else {
+        let response = Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(hyper::Body::from("Pid not set"))
+            .unwrap();
+        Ok(response)
+    }
+}
+/*pub async fn read_memory_multiple_handler(
+    pid_state: Arc<Mutex<Option<i32>>>,
+    read_memory_requests: Vec<ReadMemoryRequest>,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    let pid = pid_state.lock().unwrap();
+    if let Some(pid) = *pid {
+        let mut concatenated_buffer = Vec::new();
+
+        for request in &read_memory_requests {
+            let mut buffer: Vec<u8> = vec![0; request.size];
+            let nread = read_process_memory(
+                pid,
+                request.address as *mut libc::c_void,
+                request.size,
+                &mut buffer,
+            );
+
+            match nread {
+                Ok(_) => {
+                    let read_memory_size = buffer.len() as u32;
+                    concatenated_buffer.extend_from_slice(&1u32.to_le_bytes());
+                    concatenated_buffer.extend_from_slice(&read_memory_size.to_le_bytes());
+                    concatenated_buffer.extend_from_slice(&buffer);
+                }
+                Err(_) => {
+                    concatenated_buffer.extend_from_slice(&0u32.to_le_bytes());
+                    concatenated_buffer.extend_from_slice(&0u32.to_le_bytes());
+                }
+            }
+        }
+
+        let compressed_buffer = lz4::block::compress(&concatenated_buffer, None, true).unwrap();
+
+        let response = Response::builder()
+            .header("Content-Type", "application/octet-stream")
+            .body(hyper::Body::from(compressed_buffer))
+            .unwrap();
+        Ok(response)
+    } else {
+        let response = Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(hyper::Body::from("Pid not set"))
+            .unwrap();
+        Ok(response)
+    }
+}*/
+
+pub async fn read_memory_multiple_handler(
+    pid_state: Arc<Mutex<Option<i32>>>,
+    read_memory_requests: Vec<ReadMemoryRequest>,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    let pid = pid_state.lock().unwrap();
+    if let Some(pid) = *pid {
+        let compressed_buffers: Vec<Vec<u8>> = read_memory_requests
+            .par_iter()
+            .map(|request| {
+                let mut buffer: Vec<u8> = vec![0; request.size];
+                let nread = read_process_memory(
+                    pid,
+                    request.address as *mut libc::c_void,
+                    request.size,
+                    &mut buffer,
+                );
+                match nread {
+                    Ok(_) => {
+                        let compressed_buffer = lz4::block::compress(&buffer, None, true).unwrap();
+                        let mut result_buffer = Vec::with_capacity(4 + compressed_buffer.len());
+                        result_buffer.extend_from_slice(&1u32.to_le_bytes());
+                        result_buffer.extend_from_slice(&compressed_buffer);
+                        result_buffer
+                    }
+                    Err(_) => {
+                        let compressed_buffer = lz4::block::compress(&[], None, true).unwrap();
+                        let mut result_buffer = Vec::with_capacity(4 + compressed_buffer.len());
+                        result_buffer.extend_from_slice(&0u32.to_le_bytes());
+                        result_buffer.extend_from_slice(&compressed_buffer);
+                        result_buffer
+                    }
+                }
+            })
+            .collect();
+
+        let mut concatenated_buffer = Vec::new();
+        for buffer in compressed_buffers {
+            concatenated_buffer.extend(buffer);
+        }
+
+        let response = Response::builder()
+            .header("Content-Type", "application/octet-stream")
+            .body(hyper::Body::from(concatenated_buffer))
+            .unwrap();
+        Ok(response)
     } else {
         let response = Response::builder()
             .status(StatusCode::BAD_REQUEST)

@@ -159,6 +159,7 @@ export function convertToLittleEndianHex(value: string, type: string) {
     case "utf-16":
       return encodeStringToUtf16LEHex(value);
     case "aob":
+      return value.replace(/\s+/g, "");
     case "regex":
       return value;
     default:

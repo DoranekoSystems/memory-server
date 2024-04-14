@@ -4,17 +4,13 @@ fn main() {
     println!("cargo:rustc-link-search=native=/usr/local/lib");
 
     let mut build = cc::Build::new();
-    #[cfg(windows)]
-    {
-        build.flag("/std:c++17").flag("/W4").flag("/Zi");
-    }
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
 
-    #[cfg(not(windows))]
-    {
+    if target_os == "windows" {
+        build.flag("/std:c++17").flag("/W4").flag("/Zi");
+    } else {
         build.flag("-std=c++17").flag("-Wall").flag("-v").flag("-g");
     }
-
-    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
     match target_os.as_str() {
         "windows" => {
             build.file("src/cpp/src/native_windows.cpp");

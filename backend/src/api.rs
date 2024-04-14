@@ -5,6 +5,7 @@ use byteorder::{ByteOrder, LittleEndian};
 use hex;
 use lazy_static::lazy_static;
 use libc::{self, c_char, c_int, c_long, c_void, off_t, O_RDONLY};
+use lz4;
 use memchr::{memmem, Memchr};
 use rayon::prelude::*;
 use regex::bytes::Regex;
@@ -22,8 +23,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use warp::hyper::Body;
 use warp::{http::Response, http::StatusCode, Filter, Rejection, Reply};
-use lz4;
 
+#[cfg_attr(target_os = "android", link(name = "c++_static", kind = "static"))]
+#[cfg_attr(target_os = "android", link(name = "c++abi", kind = "static"))]
 #[link(name = "native", kind = "static")]
 extern "C" {
     fn get_pid_native() -> i32;
@@ -140,7 +142,7 @@ pub async fn read_memory_multiple_handler(
                     Ok(_) => {
                         let compressed_buffer = lz4::block::compress(&buffer, None, true).unwrap();
                         let mut result_buffer = Vec::with_capacity(8 + compressed_buffer.len());
-                        let compresed_buffer_size:u32 = compressed_buffer.len() as u32;
+                        let compresed_buffer_size: u32 = compressed_buffer.len() as u32;
                         result_buffer.extend_from_slice(&1u32.to_le_bytes());
                         result_buffer.extend_from_slice(&compresed_buffer_size.to_le_bytes());
                         result_buffer.extend_from_slice(&compressed_buffer);
@@ -777,8 +779,8 @@ pub async fn enumerate_process_handler() -> Result<impl Reply, Rejection> {
         json_array.push(json!({
             "pid": pid,
             "processname": "self".to_string()
-        })); 
-    } else{
+        }));
+    } else {
         unsafe { libc::free(process_info_ptr as *mut libc::c_void) };
     }
     let json_response = warp::reply::json(&json_array);

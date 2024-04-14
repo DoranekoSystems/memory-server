@@ -38,22 +38,38 @@ extern "C" SSIZE_T read_memory_native(int pid, uintptr_t address, size_t size,
 }
 
 extern "C" SSIZE_T write_memory_native(int pid, void *address, size_t size, unsigned char *buffer) {
-    HANDLE processHandle = OpenProcess(PROCESS_VM_WRITE | PROCESS_VM_OPERATION, FALSE, pid);
+    HANDLE processHandle = OpenProcess(PROCESS_VM_WRITE | PROCESS_VM_OPERATION | PROCESS_QUERY_INFORMATION, FALSE, pid);
     if (processHandle == NULL) {
         printf("OpenProcess failed: %lu\n", GetLastError());
         return -1;
     }
 
+    DWORD oldProtect;
+    BOOL protectResult = VirtualProtectEx(processHandle, address, size, PAGE_EXECUTE_READWRITE, &oldProtect);
+    if (!protectResult) {
+        printf("VirtualProtectEx failed: %lu\n", GetLastError());
+        CloseHandle(processHandle);
+        return -1;
+    }
+
     SIZE_T bytesWritten;
-    BOOL result = WriteProcessMemory(processHandle, address, buffer, size, &bytesWritten);
-    if (!result) {
+    BOOL writeResult = WriteProcessMemory(processHandle, address, buffer, size, &bytesWritten);
+    if (!writeResult) {
         printf("WriteProcessMemory failed: %lu\n", GetLastError());
+        VirtualProtectEx(processHandle, address, size, oldProtect, &oldProtect);
+        CloseHandle(processHandle);
+        return -1;
+    }
+
+    DWORD tempProtect;
+    protectResult = VirtualProtectEx(processHandle, address, size, oldProtect, &tempProtect);
+    if (!protectResult) {
+        printf("VirtualProtectEx failed: %lu\n", GetLastError());
         CloseHandle(processHandle);
         return -1;
     }
 
     CloseHandle(processHandle);
-
     return bytesWritten;
 }
 

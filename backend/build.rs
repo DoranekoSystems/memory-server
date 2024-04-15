@@ -21,12 +21,12 @@ fn main() {
         "ios" => {
             build.file("src/cpp/src/native_darwin.cpp");
         }
-        "android" => {
+        "android" => {     
             build.cpp_link_stdlib("stdc++");
             println!("cargo:rustc-link-lib=static=c++_static");
             println!("cargo:rustc-link-lib=static=c++abi");
             println!("cargo:rustc-link-lib=static=c++");
-            println!("cargo:rustc-cfg=TARGET_IS_ANDROID");
+            build.flag_if_supported("-DTARGET_IS_ANDROID");
             build.file("src/cpp/src/native_linux.cpp");
         }
         "linux" => {

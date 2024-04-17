@@ -1,6 +1,7 @@
 # memory-server
 
-High-Speed Memory Scanner &amp; Analyzer with REST API.
+High-Speed Memory Scanner &amp; Analyzer with REST API.  
+All data is bundled in one binary.
 
 # Usage
 

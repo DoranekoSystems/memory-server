@@ -156,11 +156,14 @@ export function Scanner() {
     }
   };
 
+  const handleDeselect = async () => {
+    setSelectedIndices([]);
+  };
+
   const handleFind = async () => {
     try {
       setIsLoading(true);
       setIsFinding(true);
-      setSelectedIndices([]);
       setSelectedIndices([]);
       const pattern = convertToLittleEndianHex(scanValue, scanType);
       const filteredRegions = await getMemoryRegions(ipAddress, protection);
@@ -461,6 +464,7 @@ export function Scanner() {
                 onChange={handlePatchValue}
               />
               <Button onClick={handlePatch}>Patch</Button>
+              <Button onClick={handleDeselect}>Deselect</Button>
             </div>
           </CardContent>
         </Card>

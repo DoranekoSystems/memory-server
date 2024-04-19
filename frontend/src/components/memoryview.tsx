@@ -16,16 +16,20 @@ export function MemoryView() {
   const ipAddress = useStore((state) => state.ipAddress);
   const [inputAddress, setInputAddress] = useState("");
   const [address, setAddress] = useState("");
+  const [prevAddress, setPrevAddress] = useState("");
   const [memoryData, setMemoryData] = useState(null);
   const [prevMemoryData, setPrevMemoryData] = useState(null);
   const [scrollOffset, setScrollOffset] = useState(0);
+  const [scrollStatus, setScrollStatus] = useState(0);
   const [encoding, setEncoding] = useState("utf-8");
   const [dataType, setDataType] = useState("byte");
   const [displayType, setDisplayType] = useState("hex");
+  const [showAscii, setShowAscii] = useState(false);
+
   useEffect(() => {
     let intervalId;
 
-    if (ipAddress && address) {
+    if (ipAddress && address != "") {
       intervalId = setInterval(async () => {
         const data = await readProcessMemory(
           ipAddress,
@@ -34,30 +38,60 @@ export function MemoryView() {
         );
         setPrevMemoryData(memoryData);
         setMemoryData(data);
-      }, 500);
+      }, 100);
     }
 
     return () => {
       clearInterval(intervalId);
     };
-  }, [ipAddress, address, memoryData]);
+  }, [address, memoryData]);
 
   useEffect(() => {
-    const newAddress =
-      "0x" + (parseInt(address, 16) + scrollOffset).toString(16);
-    setAddress(newAddress.toUpperCase());
-  }, [scrollOffset]);
+    if (scrollStatus == -1) {
+      setPrevAddress(address);
+      const newAddress =
+        "0x" + (parseInt(address, 16) - 0x10).toString(16).toUpperCase();
+      setAddress(newAddress);
+    } else if (scrollStatus == 1) {
+      setPrevAddress(address);
+      const newAddress =
+        "0x" + (parseInt(address, 16) + 0x10).toString(16).toUpperCase();
+      setAddress(newAddress);
+    } else {
+      setPrevAddress(address);
+    }
+  }, [scrollStatus]);
 
   const handleScroll = (event) => {
-    event.preventDefault();
     const delta = event.deltaY;
-    const newOffset = scrollOffset + (delta > 0 ? 0x10 : -0x10);
-    setScrollOffset(newOffset);
+    const windowHeight = window.innerHeight;
+    const scrollTop = window.scrollY;
+    const documentHeight = document.documentElement.scrollHeight;
+
+    if (window.scrollY == 0) {
+      if (delta < 0) {
+        setScrollStatus(-1);
+
+        setTimeout(() => {
+          setScrollStatus(0);
+        }, 500);
+      }
+    } else if (scrollTop + windowHeight >= documentHeight) {
+      if (delta > 0) {
+        setScrollStatus(1);
+
+        setTimeout(() => {
+          setScrollStatus(0);
+        }, 500);
+      }
+    }
   };
 
   const handleGoClick = () => {
-    let ip = inputAddress.startsWith("0x") ? inputAddress : "0x" + inputAddress;
-    setAddress(ip.toUpperCase());
+    let ip = inputAddress.startsWith("0x")
+      ? inputAddress.toUpperCase()
+      : "0x" + inputAddress.toUpperCase();
+    setAddress(ip);
   };
 
   const renderMemoryData = () => {
@@ -67,13 +101,31 @@ export function MemoryView() {
     const prevBytes = prevMemoryData ? new Uint8Array(prevMemoryData) : null;
     const lines = [];
 
-    for (let i = 0; i < bytes.length; i += 16) {
+    if (window.innerWidth < 640) {
+      lines.push(
+        <div key="address" className="font-mono text-sm">
+          <pre className="tabular-nums w-12 mr-2">
+            address {address.toString(16).padStart(8, "0")}
+          </pre>
+        </div>
+      );
+    }
+    let loopCount;
+    let length;
+    if (window.innerWidth >= 640) {
+      loopCount = bytes.length;
+      length = 16;
+    } else {
+      loopCount = 0xff;
+      length = 8;
+    }
+    for (let i = 0; i < loopCount; i += length) {
       let hexBytes;
       let hexBytesWidth;
 
       switch (dataType) {
         case "byte":
-          hexBytes = Array.from(bytes.slice(i, i + 16), (byte, index) => {
+          hexBytes = Array.from(bytes.slice(i, i + length), (byte, index) => {
             const prevByte = prevMemoryData
               ? new Uint8Array(prevMemoryData)[i + index]
               : null;
@@ -83,18 +135,25 @@ export function MemoryView() {
                 : "text-white";
             return `<span class="${color}">${
               displayType === "hex"
-                ? byte.toString(16).padStart(2, "0")
+                ? byte.toString(16).padStart(2, "0").toUpperCase()
                 : byte.toString(10).padStart(3, " ")
             }</span>`;
           }).join(" ");
-          hexBytesWidth = displayType === "hex" ? "w-96" : "w-128";
+          hexBytesWidth =
+            window.innerWidth >= 640
+              ? displayType === "hex"
+                ? "w-96"
+                : "w-128"
+              : displayType === "hex"
+              ? "w-48"
+              : "w-64";
           break;
         case "word":
           hexBytes = Array.from(
-            new Uint16Array(bytes.slice(i, i + 16).buffer),
+            new Uint16Array(bytes.slice(i, i + length).buffer),
             (word, index) => {
               const prevWord = prevBytes
-                ? new Uint16Array(prevBytes.slice(i, i + 16).buffer)[index]
+                ? new Uint16Array(prevBytes.slice(i, i + length).buffer)[index]
                 : null;
               const color =
                 prevWord !== null && prevWord !== word
@@ -102,19 +161,26 @@ export function MemoryView() {
                   : "text-white";
               return `<span class="${color}">${
                 displayType === "hex"
-                  ? word.toString(16).padStart(4, "0")
+                  ? word.toString(16).padStart(4, "0").toUpperCase()
                   : word.toString(10).padStart(5, " ")
               }</span>`;
             }
           ).join(" ");
-          hexBytesWidth = displayType === "hex" ? "w-96" : "w-160";
+          hexBytesWidth =
+            window.innerWidth >= 640
+              ? displayType === "hex"
+                ? "w-96"
+                : "w-160"
+              : displayType === "hex"
+              ? "w-48"
+              : "w-80";
           break;
         case "dword":
           hexBytes = Array.from(
-            new Uint32Array(bytes.slice(i, i + 16).buffer),
+            new Uint32Array(bytes.slice(i, i + length).buffer),
             (dword, index) => {
               const prevDword = prevBytes
-                ? new Uint32Array(prevBytes.slice(i, i + 16).buffer)[index]
+                ? new Uint32Array(prevBytes.slice(i, i + length).buffer)[index]
                 : null;
               const color =
                 prevDword !== null && prevDword !== dword
@@ -122,19 +188,28 @@ export function MemoryView() {
                   : "text-white";
               return `<span class="${color}">${
                 displayType === "hex"
-                  ? dword.toString(16).padStart(8, "0")
+                  ? dword.toString(16).padStart(8, "0").toUpperCase()
                   : dword.toString(10).padStart(10, " ")
               }</span>`;
             }
           ).join(" ");
-          hexBytesWidth = displayType === "hex" ? "w-96" : "w-256";
+          hexBytesWidth =
+            window.innerWidth >= 640
+              ? displayType === "hex"
+                ? "w-96"
+                : "w-256"
+              : displayType === "hex"
+              ? "w-48"
+              : "w-128";
           break;
         case "qword":
           hexBytes = Array.from(
-            new BigUint64Array(bytes.slice(i, i + 16).buffer),
+            new BigUint64Array(bytes.slice(i, i + length).buffer),
             (qword, index) => {
               const prevQword = prevBytes
-                ? new BigUint64Array(prevBytes.slice(i, i + 16).buffer)[index]
+                ? new BigUint64Array(prevBytes.slice(i, i + length).buffer)[
+                    index
+                  ]
                 : null;
               const color =
                 prevQword !== null && prevQword !== qword
@@ -142,15 +217,22 @@ export function MemoryView() {
                   : "text-white";
               return `<span class="${color}">${
                 displayType === "hex"
-                  ? qword.toString(16).padStart(16, "0")
+                  ? qword.toString(16).padStart(16, "0").toUpperCase()
                   : qword.toString(10).padStart(20, " ")
               }</span>`;
             }
           ).join(" ");
-          hexBytesWidth = displayType === "hex" ? "w-96" : "w-512";
+          hexBytesWidth =
+            window.innerWidth >= 640
+              ? displayType === "hex"
+                ? "w-96"
+                : "w-512"
+              : displayType === "hex"
+              ? "w-48"
+              : "w-256";
           break;
         default:
-          hexBytes = Array.from(bytes.slice(i, i + 16), (byte, index) => {
+          hexBytes = Array.from(bytes.slice(i, i + length), (byte, index) => {
             const prevByte = prevMemoryData
               ? new Uint8Array(prevMemoryData)[i + index]
               : null;
@@ -160,17 +242,24 @@ export function MemoryView() {
                 : "text-white";
             return `<span class="${color}">${
               displayType === "hex"
-                ? byte.toString(16).padStart(2, "0")
+                ? byte.toString(16).padStart(2, "0").toUpperCase()
                 : byte.toString(10).padStart(3, "0")
             }</span>`;
           }).join(" ");
-          hexBytesWidth = displayType === "hex" ? "w-96" : "w-128";
+          hexBytesWidth =
+            window.innerWidth >= 640
+              ? displayType === "hex"
+                ? "w-96"
+                : "w-128"
+              : displayType === "hex"
+              ? "w-48"
+              : "w-64";
       }
 
       let asciiBytes;
 
       if (encoding === "utf-8") {
-        asciiBytes = Array.from(bytes.slice(i, i + 16), (byte, index) => {
+        asciiBytes = Array.from(bytes.slice(i, i + length), (byte, index) => {
           const prevByte = prevMemoryData
             ? new Uint8Array(prevMemoryData)[i + index]
             : null;
@@ -184,10 +273,10 @@ export function MemoryView() {
         }).join("");
       } else if (encoding === "utf-16") {
         asciiBytes = Array.from(
-          new Uint16Array(bytes.slice(i, i + 16).buffer),
+          new Uint16Array(bytes.slice(i, i + length).buffer),
           (word, index) => {
             const prevWord = prevBytes
-              ? new Uint16Array(prevBytes.slice(i, i + 16).buffer)[index]
+              ? new Uint16Array(prevBytes.slice(i, i + length).buffer)[index]
               : null;
             const color =
               prevWord !== null && prevWord !== word
@@ -200,35 +289,55 @@ export function MemoryView() {
         ).join("");
       }
 
-      lines.push(
-        <div key={i}>
-          <pre className="tabular-nums inline-block w-32">
-            {(parseInt(address) + i).toString(16).padStart(8, "0")}
-          </pre>
-          <pre
-            className={`tabular-nums inline-block ${hexBytesWidth}`}
-            dangerouslySetInnerHTML={{ __html: hexBytes }}
-          ></pre>
-          <pre
-            className="inline-block w-16"
-            dangerouslySetInnerHTML={{ __html: asciiBytes }}
-          ></pre>
-        </div>
-      );
+      if (window.innerWidth >= 640) {
+        lines.push(
+          <div key={i} className="flex">
+            <pre className="tabular-nums w-24 mr-2">
+              {(parseInt(address) + i)
+                .toString(16)
+                .padStart(8, "0")
+                .toUpperCase()}
+            </pre>
+            <pre
+              className={`tabular-nums${hexBytesWidth}`}
+              dangerouslySetInnerHTML={{ __html: hexBytes }}
+            ></pre>
+            <pre
+              className="ml-2"
+              dangerouslySetInnerHTML={{ __html: asciiBytes }}
+            ></pre>
+          </div>
+        );
+      } else {
+        lines.push(
+          <div key={i} className="flex text-sm">
+            <pre className="tabular-nums w-10 mr-2">
+              {"+" + i.toString(16).padStart(3, "0").toUpperCase()}
+            </pre>
+            <pre
+              className={`tabular-nums ${hexBytesWidth}`}
+              dangerouslySetInnerHTML={{ __html: hexBytes }}
+            ></pre>
+            <pre
+              className="ml-2"
+              dangerouslySetInnerHTML={{ __html: asciiBytes }}
+            ></pre>
+          </div>
+        );
+      }
     }
 
     return <div className="font-mono text-sm">{lines}</div>;
   };
-
   return (
     <div className="dark min-h-screen flex flex-col bg-gray-900 text-gray-200">
-      <header className="flex items-center justify-between px-4 py-2 border-b border-gray-700">
-        <div className="flex gap-4">
+      <header className="flex flex-col sm:flex-row items-center justify-between px-4 py-2 border-b border-gray-700">
+        <div className="flex gap-4 mb-2 sm:mb-0">
           <Button size="sm" variant="ghost">
             <SaveIcon className="w-5 h-5" /> Save
           </Button>
         </div>
-        <div className="flex mt-2">
+        <div className="flex mt-2 w-full sm:w-auto">
           <Input
             className="pl-10 bg-gray-800 border-gray-700 flex-1"
             placeholder="Memory Address (Hex)"
@@ -240,11 +349,11 @@ export function MemoryView() {
           </Button>
         </div>
       </header>
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-col sm:flex-row flex-1 overflow-hidden">
         <main className="flex-1 overflow-auto p-4" onWheel={handleScroll}>
           <div className="overflow-auto">{renderMemoryData()}</div>
         </main>
-        <aside className="w-64 border-l border-gray-700 p-4">
+        <aside className="sm:w-64 border-t sm:border-t-0 sm:border-l border-gray-700 p-4">
           <h2 className="text-lg font-semibold mt-4 mb-2">Settings</h2>
 
           <div>

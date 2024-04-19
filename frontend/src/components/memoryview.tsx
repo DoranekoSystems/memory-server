@@ -76,7 +76,7 @@ export function MemoryView() {
           setScrollStatus(0);
         }, 500);
       }
-    } else if (scrollTop + windowHeight >= documentHeight) {
+    } else if (scrollTop + windowHeight >= documentHeight - 5) {
       if (delta > 0) {
         setScrollStatus(1);
 
@@ -172,8 +172,8 @@ export function MemoryView() {
                 ? "w-96"
                 : "w-160"
               : displayType === "hex"
-              ? "w-48"
-              : "w-80";
+              ? "w-40"
+              : "w-48";
           break;
         case "dword":
           hexBytes = Array.from(
@@ -199,7 +199,7 @@ export function MemoryView() {
                 ? "w-96"
                 : "w-256"
               : displayType === "hex"
-              ? "w-48"
+              ? "w-36"
               : "w-128";
           break;
         case "qword":
@@ -228,8 +228,8 @@ export function MemoryView() {
                 ? "w-96"
                 : "w-512"
               : displayType === "hex"
-              ? "w-48"
-              : "w-256";
+              ? "w-36"
+              : "w-48";
           break;
         default:
           hexBytes = Array.from(bytes.slice(i, i + length), (byte, index) => {
@@ -337,14 +337,14 @@ export function MemoryView() {
             <SaveIcon className="w-5 h-5" /> Save
           </Button>
         </div>
-        <div className="flex mt-2 w-full sm:w-auto">
+        <div className="flex flex-row items-center w-full sm:w-auto mt-2 sm:mt-0">
           <Input
-            className="pl-10 bg-gray-800 border-gray-700 flex-1"
+            className="pl-10 bg-gray-800 border-gray-700 flex-1 mr-2"
             placeholder="Memory Address (Hex)"
             value={inputAddress}
             onChange={(e) => setInputAddress(e.target.value)}
           />
-          <Button className="ml-2" onClick={handleGoClick}>
+          <Button className="mt-2 sm:mt-0 sm:ml-2" onClick={handleGoClick}>
             Go
           </Button>
         </div>

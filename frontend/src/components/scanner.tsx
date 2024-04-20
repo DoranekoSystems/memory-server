@@ -38,9 +38,11 @@ export function Scanner() {
   ]);
   const [scanResults, setScanResults] = useState<any[]>([]);
   const [scanValue, setScanValue] = useState("0");
-  const [scanType, setScanType] = useState("int32");
+  const [dataType, setDataType] = useState("int32");
+  const [findType, setFindType] = useState("exact");
   const [filterType, setFilterType] = useState("exact");
   const [protection, setProtection] = useState<string>("r+w*x-");
+  const [isFirstScan, setIsFirstScan] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [isFinding, setIsFinding] = useState(false);
   const [isFiltering, setIsFiltering] = useState(false);
@@ -72,7 +74,7 @@ export function Scanner() {
                   const memoryData = await readProcessMemory(
                     ipAddress,
                     result.address,
-                    getByteLengthFromScanType(scanType, result.value)
+                    getByteLengthFromScanType(dataType, result.value)
                   );
                   let updatedValue = "";
                   if (memoryData == null) {
@@ -105,7 +107,7 @@ export function Scanner() {
     return () => {
       clearInterval(interval);
     };
-  }, [loading, scanResults, ipAddress, scanType]);
+  }, [loading, scanResults, ipAddress, dataType]);
 
   const handleSelect = (index, address) => {
     setSelectedIndices((prevIndices) => {
@@ -129,8 +131,8 @@ export function Scanner() {
   };
 
   const handlePatch = async () => {
-    let hexString = convertToLittleEndianHex(patchValue, scanType);
-    if (scanType == "regex") {
+    let hexString = convertToLittleEndianHex(patchValue, dataType);
+    if (dataType == "regex") {
       hexString = Array.from(new TextEncoder().encode(hexString))
         .map((charCode) => charCode.toString(16).padStart(2, "0"))
         .join("");
@@ -160,12 +162,20 @@ export function Scanner() {
     setSelectedIndices([]);
   };
 
+  const handleInit = async () => {
+    setScanValue("");
+    setFindType("exact");
+    setIsFirstScan(true);
+    setScanResults([]);
+  };
+
   const handleFind = async () => {
     try {
+      setIsFirstScan(false);
       setIsLoading(true);
       setIsFinding(true);
       setSelectedIndices([]);
-      const pattern = convertToLittleEndianHex(scanValue, scanType);
+      const pattern = convertToLittleEndianHex(scanValue, dataType);
       const filteredRegions = await getMemoryRegions(ipAddress, protection);
 
       const scanRanges = filteredRegions.map((region: any) => [
@@ -184,7 +194,8 @@ export function Scanner() {
       const response = await axios.post(`http://${ipAddress}:3030/memoryscan`, {
         pattern: pattern,
         address_ranges: _addressRanges,
-        scan_type: scanType,
+        find_type: findType,
+        data_type: dataType,
         scan_id: "Scan 1",
         return_as_json: true,
       });
@@ -210,12 +221,12 @@ export function Scanner() {
       setIsFiltering(true);
       setSelectedIndices([]);
       setSelectedIndices([]);
-      const pattern = convertToLittleEndianHex(scanValue, scanType);
+      const pattern = convertToLittleEndianHex(scanValue, dataType);
       const response = await axios.post(
         `http://${ipAddress}:3030/memoryfilter`,
         {
           pattern: pattern,
-          scan_type: scanType,
+          data_type: dataType,
           scan_id: "Scan 1",
           filter_method: filterType,
           return_as_json: true,
@@ -236,6 +247,10 @@ export function Scanner() {
     }
   };
 
+  const clickReset = async () => {
+    setAddressRanges([[BigInt(0), BigInt("0x7FFFFFFFFFFFFF")]]);
+  };
+
   return (
     <div className="flex flex-col min-h-screen">
       <main className="flex flex-col items-center flex-grow mt-8 px-4">
@@ -248,32 +263,66 @@ export function Scanner() {
               <Label htmlFor="scan-value">Scan Value</Label>
               <Input
                 id="scan-value"
-                placeholder="0"
+                placeholder=""
                 value={scanValue}
                 onChange={(e) => setScanValue(e.target.value)}
+                disabled={isFirstScan && findType == "unknown"}
               />
             </div>
             <div className="flex flex-col space-y-2 md:flex-row md:space-x-2 md:space-y-0">
               <Button
                 className="w-full bg-blue-700 hover:bg-blue-800 text-white"
                 variant="secondary"
-                onClick={handleFind}
+                onClick={isFirstScan ? handleFind : handleInit}
                 disabled={isLoading}
               >
-                {isFinding ? "Finding..." : "Find"}
+                {isFinding ? "Finding..." : isFirstScan ? "Find" : "Setup"}
               </Button>
               <Button
                 className="w-full bg-green-700 hover:bg-green-800 text-white"
                 variant="secondary"
                 onClick={handleFilter}
-                disabled={isLoading}
+                disabled={isLoading || isFirstScan}
               >
                 {isFiltering ? "Filtering..." : "Filter"}
               </Button>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="scan-type">Scan Type</Label>
-              <Select value={scanType} onValueChange={setScanType}>
+              <Label htmlFor="filter-type">
+                {isFirstScan ? "Find Type" : "Filter Type"}
+              </Label>
+              <Select
+                value={isFirstScan ? findType : filterType}
+                onValueChange={isFirstScan ? setFindType : setFilterType}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="exact" />
+                </SelectTrigger>
+                <SelectContent>
+                  {isFirstScan ? (
+                    <>
+                      <SelectItem value="exact">exact</SelectItem>
+                      <SelectItem value="unknown">unknown</SelectItem>
+                    </>
+                  ) : (
+                    <>
+                      <SelectItem value="exact">exact</SelectItem>
+                      <SelectItem value="changed">changed</SelectItem>
+                      <SelectItem value="unchanged">unchanged</SelectItem>
+                      <SelectItem value="increased">increased</SelectItem>
+                      <SelectItem value="decreased">decreased</SelectItem>
+                    </>
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="scan-type">Data Type</Label>
+              <Select
+                value={dataType}
+                onValueChange={setDataType}
+                disabled={!isFirstScan}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="int32" />
                 </SelectTrigger>
@@ -292,21 +341,6 @@ export function Scanner() {
                   <SelectItem value="utf-16">utf-16</SelectItem>
                   <SelectItem value="aob">array of byte</SelectItem>
                   <SelectItem value="regex">regex</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="filter-type">Filter Type</Label>
-              <Select value={filterType} onValueChange={setFilterType}>
-                <SelectTrigger>
-                  <SelectValue placeholder="exact" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="exact">exact</SelectItem>
-                  <SelectItem value="changed">changed</SelectItem>
-                  <SelectItem value="unchanged">unchanged</SelectItem>
-                  <SelectItem value="bigger">bigger</SelectItem>
-                  <SelectItem value="smaller">smaller</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -399,6 +433,7 @@ export function Scanner() {
                     [BigInt(parseInt(e.target.value, 16)), addressRanges[0][1]],
                   ])
                 }
+                disabled={!isFirstScan}
               />
               <Input
                 placeholder="0x7FFFFFFFFFFFFF"
@@ -408,8 +443,15 @@ export function Scanner() {
                     [addressRanges[0][0], BigInt(parseInt(e.target.value, 16))],
                   ])
                 }
+                disabled={!isFirstScan}
               />
-              <Button variant="destructive">Reset</Button>
+              <Button
+                variant="destructive"
+                onClick={clickReset}
+                disabled={!isFirstScan}
+              >
+                Reset
+              </Button>
             </div>
           </CardContent>
         </Card>
@@ -442,7 +484,7 @@ export function Scanner() {
                       {`0x${BigInt(result.address).toString(16).toUpperCase()}`}
                     </TableCell>
                     <TableCell>
-                      {convertFromLittleEndianHex(result.value, scanType)}
+                      {convertFromLittleEndianHex(result.value, dataType)}
                     </TableCell>
                   </TableRow>
                 ))}

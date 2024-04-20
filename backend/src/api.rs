@@ -224,7 +224,8 @@ pub async fn write_memory_handler(
 pub struct MemoryScanRequest {
     pattern: String,
     address_ranges: Vec<(usize, usize)>,
-    scan_type: String,
+    find_type: String,
+    data_type: String,
     scan_id: String,
     return_as_json: bool,
 }
@@ -271,31 +272,61 @@ pub async fn memory_scan_handler(
                         };
 
                         if nread != -1 {
-                            if scan_request.scan_type == "regex" {
-                                let regex_pattern = &scan_request.pattern;
-                                let re = match Regex::new(regex_pattern) {
-                                    Ok(re) => re,
-                                    Err(_) => return vec![],
-                                };
+                            if scan_request.find_type == "exact" {
+                                if scan_request.data_type == "regex" {
+                                    let regex_pattern = &scan_request.pattern;
+                                    let re = match Regex::new(regex_pattern) {
+                                        Ok(re) => re,
+                                        Err(_) => return vec![],
+                                    };
 
-                                for cap in re.captures_iter(&buffer) {
-                                    let start = cap.get(0).unwrap().start();
-                                    let end = cap.get(0).unwrap().end();
-                                    let value = hex::encode(&buffer[start..end]);
-                                    local_positions.push((chunk_start + start, value));
+                                    for cap in re.captures_iter(&buffer) {
+                                        let start = cap.get(0).unwrap().start();
+                                        let end = cap.get(0).unwrap().end();
+                                        let value = hex::encode(&buffer[start..end]);
+                                        local_positions.push((chunk_start + start, value));
+                                    }
+                                } else {
+                                    let search_bytes = match hex::decode(&scan_request.pattern) {
+                                        Ok(bytes) => bytes,
+                                        Err(_) => return vec![],
+                                    };
+
+                                    let mut buffer_offset = 0;
+                                    for pos in memmem::find_iter(&buffer, &search_bytes) {
+                                        let start = chunk_start + buffer_offset + pos;
+                                        let value = scan_request.pattern.clone();
+                                        local_positions.push((start, value));
+                                        buffer_offset += pos + 1;
+                                    }
                                 }
-                            } else {
-                                let search_bytes = match hex::decode(&scan_request.pattern) {
-                                    Ok(bytes) => bytes,
-                                    Err(_) => return vec![],
+                            } else if scan_request.find_type == "unknown" {
+                                let alignment = match scan_request.data_type.as_str() {
+                                    "int16" | "uint16" => 2,
+                                    "int32" | "uint32" | "float" => 4,
+                                    "int64" | "uint64" | "double" => 8,
+                                    _ => 1,
                                 };
 
-                                let mut buffer_offset = 0;
-                                for pos in memmem::find_iter(&buffer, &search_bytes) {
-                                    let start = chunk_start + buffer_offset + pos;
-                                    let value = scan_request.pattern.clone();
-                                    local_positions.push((start, value));
-                                    buffer_offset += pos + 1;
+                                for offset in (0..buffer.len() - alignment + 1).step_by(alignment) {
+                                    let end = offset + alignment;
+                                    if end > buffer.len() {
+                                        break;
+                                    }
+                                    let bytes = &buffer[offset..end];
+                                    let num = match alignment {
+                                        2 => LittleEndian::read_u16(bytes) as u64,
+                                        4 => LittleEndian::read_u32(bytes) as u64,
+                                        8 => LittleEndian::read_u64(bytes),
+                                        _ => bytes[0] as u64,
+                                    };
+                                    let hex_string = match alignment {
+                                        2 => hex::encode((num as u16).to_le_bytes()),
+                                        4 => hex::encode((num as u32).to_le_bytes()),
+                                        8 => hex::encode((num as u64).to_le_bytes()),
+                                        _ => hex::encode([num as u8]),
+                                    };
+                                    local_positions.push((chunk_start + offset, hex_string));
                                 }
                             }
                         }
@@ -380,8 +411,8 @@ macro_rules! compare_values {
         match $filter_method {
             "changed" => $val != $old_val,
             "unchanged" => $val == $old_val,
-            "bigger" => $val > $old_val,
-            "smaller" => $val < $old_val,
+            "increased" => $val > $old_val,
+            "decreased" => $val < $old_val,
             _ => false,
         }
     };
@@ -390,7 +421,7 @@ macro_rules! compare_values {
 #[derive(Deserialize)]
 pub struct MemoryFilterRequest {
     pattern: String,
-    scan_type: String,
+    data_type: String,
     scan_id: String,
     filter_method: String,
     return_as_json: bool,
@@ -424,7 +455,7 @@ pub async fn memory_filter_handler(
                         return Ok(None);
                     }
 
-                    if filter_request.scan_type == "regex" {
+                    if filter_request.data_type == "regex" {
                         let regex_pattern = &filter_request.pattern;
                         let re = match Regex::new(regex_pattern) {
                             Ok(re) => re,
@@ -463,7 +494,7 @@ pub async fn memory_filter_handler(
                             };
                             let mut pass_filter = false;
 
-                            pass_filter = match filter_request.scan_type.as_str() {
+                            pass_filter = match filter_request.data_type.as_str() {
                                 "int8" => {
                                     let old_val = i8::from_le_bytes(bytes.try_into().unwrap());
                                     let val = i8::from_le_bytes(buffer.clone().try_into().unwrap());

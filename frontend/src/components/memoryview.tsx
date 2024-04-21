@@ -16,7 +16,7 @@ export function MemoryView() {
   const ipAddress = useStore((state) => state.ipAddress);
   const [inputAddress, setInputAddress] = useState("");
   const [address, setAddress] = useState("");
-  const [prevAddress, setPrevAddress] = useState("");
+  const [isAddressChanged, setIsAddressChanged] = useState(false);
   const [memoryData, setMemoryData] = useState(null);
   const [prevMemoryData, setPrevMemoryData] = useState(null);
   const [scrollOffset, setScrollOffset] = useState(0);
@@ -26,6 +26,15 @@ export function MemoryView() {
   const [displayType, setDisplayType] = useState("hex");
   const [showAscii, setShowAscii] = useState(false);
   const scrollableRef = useRef(null);
+  const timeoutId = useRef(null);
+
+  const setIsAddressChangedWithTimeout = () => {
+    setIsAddressChanged(true);
+    clearTimeout(timeoutId.current);
+    timeoutId.current = setTimeout(() => {
+      setIsAddressChanged(false);
+    }, 1000);
+  };
 
   useEffect(() => {
     const scrollableElement = scrollableRef.current;
@@ -42,6 +51,7 @@ export function MemoryView() {
           "0x" + (parseInt(address, 16) + 0x10).toString(16).toUpperCase();
         setAddress(newAddress);
       }
+      setIsAddressChangedWithTimeout();
     };
 
     scrollableElement.addEventListener("wheel", handleScroll, {
@@ -78,6 +88,7 @@ export function MemoryView() {
       ? inputAddress.toUpperCase()
       : "0x" + inputAddress.toUpperCase();
     setAddress(ip);
+    setIsAddressChangedWithTimeout();
   };
 
   const renderMemoryData = () => {
@@ -116,7 +127,7 @@ export function MemoryView() {
               ? new Uint8Array(prevMemoryData)[i + index]
               : null;
             const color =
-              prevByte !== null && prevByte !== byte
+              prevByte !== null && prevByte !== byte && !isAddressChanged
                 ? "text-red-500"
                 : "text-white";
             return `<span class="${color}">${
@@ -142,7 +153,7 @@ export function MemoryView() {
                 ? new Uint16Array(prevBytes.slice(i, i + length).buffer)[index]
                 : null;
               const color =
-                prevWord !== null && prevWord !== word
+                prevWord !== null && prevWord !== word && !isAddressChanged
                   ? "text-red-500"
                   : "text-white";
               return `<span class="${color}">${
@@ -169,7 +180,7 @@ export function MemoryView() {
                 ? new Uint32Array(prevBytes.slice(i, i + length).buffer)[index]
                 : null;
               const color =
-                prevDword !== null && prevDword !== dword
+                prevDword !== null && prevDword !== dword && !isAddressChanged
                   ? "text-red-500"
                   : "text-white";
               return `<span class="${color}">${
@@ -198,7 +209,7 @@ export function MemoryView() {
                   ]
                 : null;
               const color =
-                prevQword !== null && prevQword !== qword
+                prevQword !== null && prevQword !== qword && !isAddressChanged
                   ? "text-red-500"
                   : "text-white";
               return `<span class="${color}">${
@@ -223,7 +234,7 @@ export function MemoryView() {
               ? new Uint8Array(prevMemoryData)[i + index]
               : null;
             const color =
-              prevByte !== null && prevByte !== byte
+              prevByte !== null && prevByte !== byte && !isAddressChanged
                 ? "text-red-500"
                 : "text-white";
             return `<span class="${color}">${
@@ -250,7 +261,7 @@ export function MemoryView() {
             ? new Uint8Array(prevMemoryData)[i + index]
             : null;
           const color =
-            prevByte !== null && prevByte !== byte
+            prevByte !== null && prevByte !== byte && !isAddressChanged
               ? "text-red-500"
               : "text-white";
           return `<span class="${color}">${
@@ -265,7 +276,7 @@ export function MemoryView() {
               ? new Uint16Array(prevBytes.slice(i, i + length).buffer)[index]
               : null;
             const color =
-              prevWord !== null && prevWord !== word
+              prevWord !== null && prevWord !== word && !isAddressChanged
                 ? "text-red-500"
                 : "text-white";
             return `<span class="${color}">${

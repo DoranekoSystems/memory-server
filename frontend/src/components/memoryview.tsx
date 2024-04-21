@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,6 +25,33 @@ export function MemoryView() {
   const [dataType, setDataType] = useState("byte");
   const [displayType, setDisplayType] = useState("hex");
   const [showAscii, setShowAscii] = useState(false);
+  const scrollableRef = useRef(null);
+
+  useEffect(() => {
+    const scrollableElement = scrollableRef.current;
+    const handleScroll = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const delta = event.deltaY;
+      if (delta < 0) {
+        const newAddress =
+          "0x" + (parseInt(address, 16) - 0x10).toString(16).toUpperCase();
+        setAddress(newAddress);
+      } else if (delta > 0) {
+        const newAddress =
+          "0x" + (parseInt(address, 16) + 0x10).toString(16).toUpperCase();
+        setAddress(newAddress);
+      }
+    };
+
+    scrollableElement.addEventListener("wheel", handleScroll, {
+      passive: false,
+    });
+
+    return () => {
+      scrollableElement.removeEventListener("wheel", handleScroll);
+    };
+  }, [address]);
 
   useEffect(() => {
     let intervalId;
@@ -45,47 +72,6 @@ export function MemoryView() {
       clearInterval(intervalId);
     };
   }, [address, memoryData]);
-
-  useEffect(() => {
-    if (scrollStatus == -1) {
-      setPrevAddress(address);
-      const newAddress =
-        "0x" + (parseInt(address, 16) - 0x10).toString(16).toUpperCase();
-      setAddress(newAddress);
-    } else if (scrollStatus == 1) {
-      setPrevAddress(address);
-      const newAddress =
-        "0x" + (parseInt(address, 16) + 0x10).toString(16).toUpperCase();
-      setAddress(newAddress);
-    } else {
-      setPrevAddress(address);
-    }
-  }, [scrollStatus]);
-
-  const handleScroll = (event) => {
-    const delta = event.deltaY;
-    const windowHeight = window.innerHeight;
-    const scrollTop = window.scrollY;
-    const documentHeight = document.documentElement.scrollHeight;
-
-    if (window.scrollY == 0) {
-      if (delta < 0) {
-        setScrollStatus(-1);
-
-        setTimeout(() => {
-          setScrollStatus(0);
-        }, 500);
-      }
-    } else if (scrollTop + windowHeight >= documentHeight - 5) {
-      if (delta > 0) {
-        setScrollStatus(1);
-
-        setTimeout(() => {
-          setScrollStatus(0);
-        }, 500);
-      }
-    }
-  };
 
   const handleGoClick = () => {
     let ip = inputAddress.startsWith("0x")
@@ -113,7 +99,7 @@ export function MemoryView() {
     let loopCount;
     let length;
     if (window.innerWidth >= 640) {
-      loopCount = bytes.length;
+      loopCount = 0x1ff;
       length = 16;
     } else {
       loopCount = 0xff;
@@ -350,8 +336,11 @@ export function MemoryView() {
         </div>
       </header>
       <div className="flex flex-col sm:flex-row flex-1 overflow-hidden">
-        <main className="flex-1 overflow-auto p-4" onWheel={handleScroll}>
+        <main className="flex-1 overflow-auto p-4" ref={scrollableRef}>
           <div className="overflow-auto">{renderMemoryData()}</div>
+          <div className="mt-2 text-gray-600">
+            Scrolling is not possible in this area.
+          </div>
         </main>
         <aside className="sm:w-64 border-t sm:border-t-0 sm:border-l border-gray-700 p-4">
           <h2 className="text-lg font-semibold mt-4 mb-2">Settings</h2>

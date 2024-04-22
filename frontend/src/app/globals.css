@@ -35,3 +35,34 @@ body {
 .input-no-caret {
   caret-color: transparent;
 }
+
+.resize-container {
+  resize: both;
+  overflow: auto;
+  transform-origin: top left;
+}
+
+.draggable {
+  position: absolute;
+  cursor: move;
+}
+
+.region {
+  border: 1px solid #4b5563;
+  transition: border-color 0.2s ease-in-out;
+  z-index: 1;
+}
+
+.region.selected {
+  border: 2px solid #60a5fa;
+  z-index: 2;
+}
+
+.region.inactive {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.memorydata.inactive {
+  pointer-events: none;
+}

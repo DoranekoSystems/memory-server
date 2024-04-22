@@ -13,20 +13,62 @@ import {
 import { getMemoryRegions, readProcessMemory } from "../lib/api";
 
 export function MemoryView() {
+  const isMobile = window.innerWidth < 640;
   const ipAddress = useStore((state) => state.ipAddress);
   const [inputAddress, setInputAddress] = useState("");
-  const [address, setAddress] = useState("");
+  const [selectedRegion, setSelectedRegion] = useState(null);
+  const [regions, setRegions] = useState([]);
   const [isAddressChanged, setIsAddressChanged] = useState(false);
-  const [memoryData, setMemoryData] = useState(null);
-  const [prevMemoryData, setPrevMemoryData] = useState(null);
-  const [scrollOffset, setScrollOffset] = useState(0);
-  const [scrollStatus, setScrollStatus] = useState(0);
-  const [encoding, setEncoding] = useState("utf-8");
-  const [dataType, setDataType] = useState("byte");
-  const [displayType, setDisplayType] = useState("hex");
-  const [showAscii, setShowAscii] = useState(false);
-  const scrollableRef = useRef(null);
+  const scrollableRefs = useRef([]);
   const timeoutId = useRef(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isDraggingId, setIsDraggingId] = useState(null);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+
+  const handleCloseRegion = (regionId) => {
+    setRegions((prevRegions) =>
+      prevRegions.filter((region) => region.id !== regionId)
+    );
+    if (selectedRegion === regionId) {
+      setSelectedRegion(null);
+    }
+  };
+
+  const handleMouseDown = (event, regionId) => {
+    selectRegion(regionId);
+    setIsDraggingId(regionId);
+    setIsDragging(true);
+    const scrollableElement = scrollableRefs.current[regionId];
+    if (scrollableElement) {
+      setDragOffset({
+        x: event.clientX - scrollableElement.offsetLeft,
+        y: event.clientY - scrollableElement.offsetTop,
+      });
+    }
+    scrollableRefs.current.map((element) => {
+      if (scrollableRefs.current[regionId] != element) {
+        element.style.pointerEvents = "none";
+      }
+    });
+  };
+
+  const handleMouseMove = (event, regionId) => {
+    if (isDraggingId === regionId) {
+      const scrollableElement = scrollableRefs.current[regionId];
+      if (scrollableElement) {
+        scrollableElement.style.left = `${event.clientX - dragOffset.x}px`;
+        scrollableElement.style.top = `${event.clientY - dragOffset.y}px`;
+      }
+    }
+  };
+
+  const handleMouseUp = () => {
+    scrollableRefs.current.map((element) => {
+      element.style.pointerEvents = "auto";
+    });
+    setIsDraggingId(null);
+    setIsDragging(false);
+  };
 
   const setIsAddressChangedWithTimeout = () => {
     setIsAddressChanged(true);
@@ -37,72 +79,157 @@ export function MemoryView() {
   };
 
   useEffect(() => {
-    const scrollableElement = scrollableRef.current;
     const handleScroll = (event) => {
       event.preventDefault();
       event.stopPropagation();
       const delta = event.deltaY;
       if (delta < 0) {
-        const newAddress =
-          "0x" + (parseInt(address, 16) - 0x10).toString(16).toUpperCase();
-        setAddress(newAddress);
+        setRegions((prevRegions) =>
+          prevRegions.map((region) =>
+            region.id === selectedRegion
+              ? {
+                  ...region,
+                  address:
+                    "0x" +
+                    (parseInt(region.address, 16) - 0x10)
+                      .toString(16)
+                      .toUpperCase(),
+                }
+              : region
+          )
+        );
       } else if (delta > 0) {
-        const newAddress =
-          "0x" + (parseInt(address, 16) + 0x10).toString(16).toUpperCase();
-        setAddress(newAddress);
+        setRegions((prevRegions) =>
+          prevRegions.map((region) =>
+            region.id === selectedRegion
+              ? {
+                  ...region,
+                  address:
+                    "0x" +
+                    (parseInt(region.address, 16) + 0x10)
+                      .toString(16)
+                      .toUpperCase(),
+                }
+              : region
+          )
+        );
       }
       setIsAddressChangedWithTimeout();
     };
 
-    scrollableElement.addEventListener("wheel", handleScroll, {
-      passive: false,
-    });
+    if (selectedRegion) {
+      const scrollableElement = scrollableRefs.current[selectedRegion];
+      if (scrollableElement) {
+        scrollableElement.addEventListener("wheel", handleScroll, {
+          passive: false,
+        });
 
-    return () => {
-      scrollableElement.removeEventListener("wheel", handleScroll);
-    };
-  }, [address]);
+        return () => {
+          scrollableElement.removeEventListener("wheel", handleScroll);
+        };
+      }
+    }
+  }, [selectedRegion]);
 
   useEffect(() => {
-    let intervalId;
+    let intervalIds = [];
 
-    if (ipAddress && address != "") {
-      intervalId = setInterval(async () => {
-        const data = await readProcessMemory(
-          ipAddress,
-          parseInt(address, 16),
-          1024
-        );
-        setPrevMemoryData(memoryData);
-        setMemoryData(data);
-      }, 100);
+    if (ipAddress) {
+      intervalIds = regions.map((region) => {
+        if (region.address) {
+          return setInterval(async () => {
+            const data = await readProcessMemory(
+              ipAddress,
+              parseInt(region.address, 16),
+              512
+            );
+            setRegions((prevRegions) =>
+              prevRegions.map((r) =>
+                r.id === region.id
+                  ? {
+                      ...r,
+                      prevMemoryData: r.memoryData,
+                      memoryData: data,
+                    }
+                  : r
+              )
+            );
+          }, 200);
+        }
+        return null;
+      });
     }
 
     return () => {
-      clearInterval(intervalId);
+      intervalIds.forEach((intervalId) => {
+        if (intervalId) {
+          clearInterval(intervalId);
+        }
+      });
     };
-  }, [address, memoryData]);
+  }, [ipAddress, regions]);
+
+  const addRegion = () => {
+    const newRegion = {
+      id: Date.now(),
+      address: "",
+      memoryData: null,
+      prevMemoryData: null,
+      encoding: "utf-8",
+      dataType: "byte",
+      displayType: "hex",
+    };
+    setRegions([...regions, newRegion]);
+    setSelectedRegion(newRegion.id);
+  };
+
+  const selectRegion = (regionId) => {
+    setSelectedRegion(regionId);
+  };
+
+  const updateSelectedRegion = (updatedRegion) => {
+    setRegions((prevRegions) =>
+      prevRegions.map((region) =>
+        region.id === selectedRegion ? { ...region, ...updatedRegion } : region
+      )
+    );
+    setSelectedRegion((prevSelectedRegion) => {
+      if (prevSelectedRegion === null) return null;
+      return {
+        ...updatedRegion,
+      };
+    });
+  };
+  const getSelectedRegion = () => {
+    return regions.find((region) => region.id === selectedRegion);
+  };
 
   const handleGoClick = () => {
-    let ip = inputAddress.startsWith("0x")
+    const ip = inputAddress.startsWith("0x")
       ? inputAddress.toUpperCase()
       : "0x" + inputAddress.toUpperCase();
-    setAddress(ip);
+    setRegions(
+      regions.map((region) =>
+        region.id === selectedRegion ? { ...region, address: ip } : region
+      )
+    );
     setIsAddressChangedWithTimeout();
   };
 
-  const renderMemoryData = () => {
-    if (!memoryData) return null;
+  const renderMemoryData = (region) => {
+    if (!region || !region.memoryData) return null;
 
-    const bytes = new Uint8Array(memoryData);
-    const prevBytes = prevMemoryData ? new Uint8Array(prevMemoryData) : null;
+    const bytes = new Uint8Array(region.memoryData);
+    const prevBytes = region.prevMemoryData
+      ? new Uint8Array(region.prevMemoryData)
+      : null;
     const lines = [];
 
     if (window.innerWidth < 640) {
       lines.push(
         <div key="address" className="font-mono text-sm">
           <pre className="tabular-nums w-12 mr-2">
-            address {address.toString(16).padStart(8, "0")}
+            address {region.address.toString(16).padStart(8, "0")}
           </pre>
         </div>
       );
@@ -120,28 +247,26 @@ export function MemoryView() {
       let hexBytes;
       let hexBytesWidth;
 
-      switch (dataType) {
+      switch (region.dataType) {
         case "byte":
           hexBytes = Array.from(bytes.slice(i, i + length), (byte, index) => {
-            const prevByte = prevMemoryData
-              ? new Uint8Array(prevMemoryData)[i + index]
-              : null;
+            const prevByte = prevBytes ? prevBytes[i + index] : null;
             const color =
               prevByte !== null && prevByte !== byte && !isAddressChanged
                 ? "text-red-500"
                 : "text-white";
             return `<span class="${color}">${
-              displayType === "hex"
+              region.displayType === "hex"
                 ? byte.toString(16).padStart(2, "0").toUpperCase()
                 : byte.toString(10).padStart(3, " ")
             }</span>`;
           }).join(" ");
           hexBytesWidth =
             window.innerWidth >= 640
-              ? displayType === "hex"
+              ? region.displayType === "hex"
                 ? "w-96"
                 : "w-128"
-              : displayType === "hex"
+              : region.displayType === "hex"
               ? "w-48"
               : "w-64";
           break;
@@ -157,7 +282,7 @@ export function MemoryView() {
                   ? "text-red-500"
                   : "text-white";
               return `<span class="${color}">${
-                displayType === "hex"
+                region.displayType === "hex"
                   ? word.toString(16).padStart(4, "0").toUpperCase()
                   : word.toString(10).padStart(5, " ")
               }</span>`;
@@ -165,10 +290,10 @@ export function MemoryView() {
           ).join(" ");
           hexBytesWidth =
             window.innerWidth >= 640
-              ? displayType === "hex"
+              ? region.displayType === "hex"
                 ? "w-96"
                 : "w-160"
-              : displayType === "hex"
+              : region.displayType === "hex"
               ? "w-40"
               : "w-48";
           break;
@@ -184,7 +309,7 @@ export function MemoryView() {
                   ? "text-red-500"
                   : "text-white";
               return `<span class="${color}">${
-                displayType === "hex"
+                region.displayType === "hex"
                   ? dword.toString(16).padStart(8, "0").toUpperCase()
                   : dword.toString(10).padStart(10, " ")
               }</span>`;
@@ -192,10 +317,10 @@ export function MemoryView() {
           ).join(" ");
           hexBytesWidth =
             window.innerWidth >= 640
-              ? displayType === "hex"
+              ? region.displayType === "hex"
                 ? "w-96"
                 : "w-256"
-              : displayType === "hex"
+              : region.displayType === "hex"
               ? "w-36"
               : "w-128";
           break;
@@ -213,7 +338,7 @@ export function MemoryView() {
                   ? "text-red-500"
                   : "text-white";
               return `<span class="${color}">${
-                displayType === "hex"
+                region.displayType === "hex"
                   ? qword.toString(16).padStart(16, "0").toUpperCase()
                   : qword.toString(10).padStart(20, " ")
               }</span>`;
@@ -221,45 +346,41 @@ export function MemoryView() {
           ).join(" ");
           hexBytesWidth =
             window.innerWidth >= 640
-              ? displayType === "hex"
+              ? region.displayType === "hex"
                 ? "w-96"
                 : "w-512"
-              : displayType === "hex"
+              : region.displayType === "hex"
               ? "w-36"
               : "w-48";
           break;
         default:
           hexBytes = Array.from(bytes.slice(i, i + length), (byte, index) => {
-            const prevByte = prevMemoryData
-              ? new Uint8Array(prevMemoryData)[i + index]
-              : null;
+            const prevByte = prevBytes ? prevBytes[i + index] : null;
             const color =
               prevByte !== null && prevByte !== byte && !isAddressChanged
                 ? "text-red-500"
                 : "text-white";
             return `<span class="${color}">${
-              displayType === "hex"
+              region.displayType === "hex"
                 ? byte.toString(16).padStart(2, "0").toUpperCase()
                 : byte.toString(10).padStart(3, "0")
             }</span>`;
           }).join(" ");
           hexBytesWidth =
             window.innerWidth >= 640
-              ? displayType === "hex"
+              ? region.displayType === "hex"
                 ? "w-96"
                 : "w-128"
-              : displayType === "hex"
+              : region.displayType === "hex"
               ? "w-48"
               : "w-64";
       }
 
       let asciiBytes;
 
-      if (encoding === "utf-8") {
+      if (region.encoding === "utf-8") {
         asciiBytes = Array.from(bytes.slice(i, i + length), (byte, index) => {
-          const prevByte = prevMemoryData
-            ? new Uint8Array(prevMemoryData)[i + index]
-            : null;
+          const prevByte = prevBytes ? prevBytes[i + index] : null;
           const color =
             prevByte !== null && prevByte !== byte && !isAddressChanged
               ? "text-red-500"
@@ -268,7 +389,7 @@ export function MemoryView() {
             byte >= 32 && byte <= 126 ? String.fromCharCode(byte) : "."
           }</span>`;
         }).join("");
-      } else if (encoding === "utf-16") {
+      } else if (region.encoding === "utf-16") {
         asciiBytes = Array.from(
           new Uint16Array(bytes.slice(i, i + length).buffer),
           (word, index) => {
@@ -290,7 +411,7 @@ export function MemoryView() {
         lines.push(
           <div key={i} className="flex">
             <pre className="tabular-nums w-24 mr-2">
-              {(parseInt(address) + i)
+              {(parseInt(region.address) + i)
                 .toString(16)
                 .padStart(8, "0")
                 .toUpperCase()}
@@ -326,10 +447,14 @@ export function MemoryView() {
 
     return <div className="font-mono text-sm">{lines}</div>;
   };
+
   return (
     <div className="dark min-h-screen flex flex-col bg-gray-900 text-gray-200">
       <header className="flex flex-col sm:flex-row items-center justify-between px-4 py-2 border-b border-gray-700">
         <div className="flex gap-4 mb-2 sm:mb-0">
+          <Button size="sm" variant="ghost" onClick={addRegion}>
+            <PlusIcon className="w-5 h-5" /> Add Region
+          </Button>
           <Button size="sm" variant="ghost">
             <SaveIcon className="w-5 h-5" /> Save
           </Button>
@@ -347,11 +472,66 @@ export function MemoryView() {
         </div>
       </header>
       <div className="flex flex-col sm:flex-row flex-1 overflow-hidden">
-        <main className="flex-1 overflow-auto p-4" ref={scrollableRef}>
-          <div className="overflow-auto">{renderMemoryData()}</div>
-          <div className="mt-2 text-gray-600">
-            Scrolling is not possible in this area.
+        <main className="flex-1 overflow-auto p-4">
+          <div className="flex">
+            {regions.map((region) => (
+              <div
+                key={region.id}
+                className={`tab ${
+                  region.id === selectedRegion ? "active" : ""
+                }`}
+                onClick={() => setSelectedRegion(region.id)}
+              >
+                Region {regions.indexOf(region) + 1}
+                <button
+                  className="ml-2 text-gray-400 hover:text-white"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleCloseRegion(region.id);
+                  }}
+                >
+                  &times;
+                </button>
+              </div>
+            ))}
           </div>
+          {regions.map((region) => (
+            <div
+              key={region.id}
+              className={`inline-block p-2 resize-container draggableregion ${
+                region.id === selectedRegion ? "selected" : ""
+              } ${isDragging && region.id !== isDraggingId ? "inactive" : ""}`}
+              style={{
+                maxWidth: isMobile ? "auto" : "auto",
+                width: isMobile ? "auto" : "fit-content",
+                height: isMobile ? "auto" : "fit-content",
+                pointerEvents: isMobile ? "auto" : "none",
+              }}
+              ref={(ref) => {
+                scrollableRefs.current[region.id] = ref;
+              }}
+              onMouseDown={
+                isMobile ? null : (event) => handleMouseDown(event, region.id)
+              }
+              onMouseMove={
+                isMobile ? null : (event) => handleMouseMove(event, region.id)
+              }
+              onMouseUp={isMobile ? null : handleMouseUp}
+              onMouseLeave={isMobile ? null : handleMouseUp}
+            >
+              <div className={`memory-data ${isDragging ? "inactive" : ""}`}>
+                {renderMemoryData(region)}
+              </div>
+              <div className="flex justify-start">
+                <button
+                  className="m-3 px-1 py-1 bg-red-800 text-white text-sm rounded hover:bg-red-900 focus:outline-none"
+                  onClick={() => handleCloseRegion(region.id)}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          ))}
         </main>
         <aside className="sm:w-64 border-t sm:border-t-0 sm:border-l border-gray-700 p-4">
           <h2 className="text-lg font-semibold mt-4 mb-2">Settings</h2>
@@ -363,8 +543,11 @@ export function MemoryView() {
             <Select
               className="mt-1"
               id="displayType"
-              value={displayType}
-              onValueChange={(value) => setDisplayType(value)}
+              value={getSelectedRegion()?.displayType}
+              onValueChange={(value) => {
+                updateSelectedRegion({ displayType: value });
+                setSelectedRegion(selectedRegion);
+              }}
             >
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Select a display type" />
@@ -380,8 +563,11 @@ export function MemoryView() {
             <Select
               className="mt-1"
               id="encoding"
-              value={encoding}
-              onValueChange={(value) => setEncoding(value)}
+              value={getSelectedRegion()?.encoding}
+              onValueChange={(value) => {
+                updateSelectedRegion({ encoding: value });
+                setSelectedRegion(selectedRegion);
+              }}
             >
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Select" />
@@ -397,8 +583,11 @@ export function MemoryView() {
             <Select
               className="mt-1"
               id="dataType"
-              value={dataType}
-              onValueChange={(value) => setDataType(value)}
+              value={getSelectedRegion()?.dataType}
+              onValueChange={(value) => {
+                updateSelectedRegion({ dataType: value });
+                setSelectedRegion(selectedRegion);
+              }}
             >
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Select" />
@@ -417,7 +606,27 @@ export function MemoryView() {
   );
 }
 
-// SaveIcon and SearchIcon components remain the same
+// PlusIcon, SaveIcon, and SearchIcon components remain the same
+
+function PlusIcon(props) {
+  return (
+    <svg
+      {...props}
+      xmlns="http://www.w3.org/2000/svg"
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  );
+}
 
 function SaveIcon(props) {
   return (

@@ -13,7 +13,7 @@ import {
 import { getMemoryRegions, readProcessMemory } from "../lib/api";
 
 export function MemoryView() {
-  const isMobile = window.innerWidth < 640;
+  const [isMobile, setIsMobile] = useState(false);
   const ipAddress = useStore((state) => state.ipAddress);
   const [inputAddress, setInputAddress] = useState("");
   const [selectedRegion, setSelectedRegion] = useState(null);
@@ -79,6 +79,8 @@ export function MemoryView() {
   };
 
   useEffect(() => {
+    setIsMobile(window.innerWidth < 640);
+
     const handleScroll = (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -154,7 +156,7 @@ export function MemoryView() {
                   : r
               )
             );
-          }, 200);
+          }, 100);
         }
         return null;
       });
@@ -473,51 +475,19 @@ export function MemoryView() {
       </header>
       <div className="flex flex-col sm:flex-row flex-1 overflow-hidden">
         <main className="flex-1 overflow-auto p-4">
-          <div className="flex">
-            {regions.map((region) => (
-              <div
-                key={region.id}
-                className={`tab ${
-                  region.id === selectedRegion ? "active" : ""
-                }`}
-                onClick={() => setSelectedRegion(region.id)}
-              >
-                Region {regions.indexOf(region) + 1}
-                <button
-                  className="ml-2 text-gray-400 hover:text-white"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleCloseRegion(region.id);
-                  }}
-                >
-                  &times;
-                </button>
-              </div>
-            ))}
-          </div>
           {regions.map((region) => (
             <div
               key={region.id}
-              className={`inline-block p-2 resize-container draggableregion ${
+              className={`inline-block p-2 resize-container draggableregion region ${
                 region.id === selectedRegion ? "selected" : ""
               } ${isDragging && region.id !== isDraggingId ? "inactive" : ""}`}
-              style={{
-                maxWidth: isMobile ? "auto" : "auto",
-                width: isMobile ? "auto" : "fit-content",
-                height: isMobile ? "auto" : "fit-content",
-                pointerEvents: isMobile ? "auto" : "none",
-              }}
               ref={(ref) => {
                 scrollableRefs.current[region.id] = ref;
               }}
-              onMouseDown={
-                isMobile ? null : (event) => handleMouseDown(event, region.id)
-              }
-              onMouseMove={
-                isMobile ? null : (event) => handleMouseMove(event, region.id)
-              }
-              onMouseUp={isMobile ? null : handleMouseUp}
-              onMouseLeave={isMobile ? null : handleMouseUp}
+              onMouseDown={(event) => handleMouseDown(event, region.id)}
+              onMouseMove={(event) => handleMouseMove(event, region.id)}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseUp}
             >
               <div className={`memory-data ${isDragging ? "inactive" : ""}`}>
                 {renderMemoryData(region)}

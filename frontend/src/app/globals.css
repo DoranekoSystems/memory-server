@@ -37,9 +37,7 @@ body {
 }
 
 .resize-container {
-  resize: both;
   overflow: auto;
-  transform-origin: top left;
 }
 
 .draggable {
@@ -59,7 +57,6 @@ body {
 }
 
 .region.inactive {
-  opacity: 0.6;
   pointer-events: none;
 }
 

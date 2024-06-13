@@ -10,8 +10,11 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@emotion/react": "^11.11.4",
+    "@emotion/styled": "^11.11.5",
     "@fluentui/react-card": "^9.0.65",
-    "@mui/material": "^5.15.6",
+    "@mui/icons-material": "^5.15.20",
+    "@mui/material": "^5.15.20",
     "@radix-ui/react-icons": "^1.3.0",
     "@radix-ui/react-label": "^2.0.2",
     "@radix-ui/react-select": "^2.0.0",

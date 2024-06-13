@@ -22,6 +22,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import CustomTable from "../components/ui/customtable";
 
 import {
   getByteLengthFromScanType,
@@ -141,8 +142,8 @@ export function Scanner() {
       hexString.match(/.{1,2}/g).map((byte) => parseInt(byte, 16))
     );
 
-    try {
-      for (const address of selectedAddresses) {
+    for (const address of selectedAddresses) {
+      try {
         await axios.post(`http://${ipAddress}:3030/writememory`, {
           address: address,
           buffer: Array.from(buffer),
@@ -152,14 +153,15 @@ export function Scanner() {
             .toString(16)
             .toUpperCase()}`
         );
+      } catch (error) {
+        console.error("Error patching memory:", error);
       }
-    } catch (error) {
-      console.error("Error patching memory:", error);
     }
   };
 
   const handleDeselect = async () => {
     setSelectedIndices([]);
+    setSelectedAddresses([]);
   };
 
   const handleInit = async () => {
@@ -167,10 +169,13 @@ export function Scanner() {
     setFindType("exact");
     setIsFirstScan(true);
     setScanResults([]);
+    setSelectedIndices([]);
+    setSelectedAddresses([]);
   };
 
   const handleFind = async () => {
     try {
+      if (scanValue == "") return;
       setIsFirstScan(false);
       setIsLoading(true);
       setIsFinding(true);
@@ -277,7 +282,11 @@ export function Scanner() {
                 onClick={isFirstScan ? handleFind : handleInit}
                 disabled={isLoading}
               >
-                {isFinding ? "Finding..." : isFirstScan ? "Find" : "Setup"}
+                {isFinding
+                  ? "Finding..."
+                  : isFirstScan
+                  ? "First Scan"
+                  : "New Scan"}
               </Button>
               <Button
                 className="w-full bg-green-700 hover:bg-green-800 text-white"
@@ -285,7 +294,7 @@ export function Scanner() {
                 onClick={handleFilter}
                 disabled={isLoading || isFirstScan}
               >
-                {isFiltering ? "Filtering..." : "Filter"}
+                {isFiltering ? "Filtering..." : "Next Scan"}
               </Button>
             </div>
             <div className="space-y-2">
@@ -459,38 +468,16 @@ export function Scanner() {
         <Card className="w-full max-w-4xl mb-6">
           <CardHeader>
             <CardTitle className="text-2xl">Scan Data List</CardTitle>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Showing {scanResults.slice(0, 1000).length} of{" "}
-              {scanResults.length} results
-            </p>
           </CardHeader>
-          <CardContent className="overflow-y-auto max-h-[500px]">
-            <Table ref={tableRef}>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Index</TableHead>
-                  <TableHead>Address</TableHead>
-                  <TableHead>Value</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {scanResults.slice(0, 1000).map((result, index) => (
-                  <TableRow
-                    key={index}
-                    selected={selectedIndices.includes(index + 1)}
-                    onSelect={() => handleSelect(index + 1, result.address)}
-                  >
-                    <TableCell>{index + 1}</TableCell>
-                    <TableCell>
-                      {`0x${BigInt(result.address).toString(16).toUpperCase()}`}
-                    </TableCell>
-                    <TableCell>
-                      {convertFromLittleEndianHex(result.value, dataType)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+          <CardContent className="max-h-[500px]">
+            <CustomTable
+              ref={tableRef}
+              scanResults={scanResults}
+              selectedIndices={selectedIndices}
+              handleSelect={handleSelect}
+              dataType={dataType}
+              convertFromLittleEndianHex={convertFromLittleEndianHex}
+            />
           </CardContent>
         </Card>
         <Card className="w-full max-w-4xl">

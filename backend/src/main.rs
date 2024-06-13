@@ -13,6 +13,17 @@ mod util;
 static STATIC_DIR: Dir = include_dir!("../frontend/out");
 
 async fn serve_static(path: String) -> Result<impl warp::Reply, warp::Rejection> {
+    // Adjustment for include_dir! in windows environment
+    let path = {
+        #[cfg(host_os = "windows")]
+        {
+            path.replace("/", "\\")
+        }
+        #[cfg(not(host_os = "windows"))]
+        {
+            path
+        }
+    };
     match STATIC_DIR.get_file(&path) {
         Some(file) => {
             let mime_type = mime_guess::from_path(&path).first_or_octet_stream();

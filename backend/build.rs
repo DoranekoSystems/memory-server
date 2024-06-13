@@ -6,6 +6,10 @@ fn main() {
     let mut build = cc::Build::new();
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
 
+    if cfg!(windows) {
+        println!("cargo:rustc-cfg=host_os=\"windows\"");
+    }
+    
     if target_os == "windows" {
         build.flag("/std:c++17").flag("/W4").flag("/Zi");
     } else {

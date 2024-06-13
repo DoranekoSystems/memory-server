@@ -75,3 +75,6 @@ This method allows the android device to operate on its own.
 
 <img height="500" alt="img4" src="https://github.com/DoranekoSystems/memory-server/assets/96031346/0a629a2c-6401-4f2c-b67a-bf8b9ad3d682">
 
+# Build
+
+For more information, please visit [Wiki](https://github.com/DoranekoSystems/memory-server/wiki/Build)

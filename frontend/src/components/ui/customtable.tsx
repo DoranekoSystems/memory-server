@@ -1,14 +1,29 @@
-import React, { useState, forwardRef } from "react";
+import React, {
+  useEffect,
+  useRef,
+  forwardRef,
+  useCallback,
+  useState,
+} from "react";
+import { AutoSizer, Column, Table as RVTable } from "react-virtualized";
+import "react-virtualized/styles.css";
 import {
   Table,
+  TableHeader,
   TableBody,
-  TableCell,
-  TableContainer,
+  TableFooter,
   TableHead,
   TableRow,
-  Paper,
-  TablePagination,
-} from "@mui/material";
+  TableCell,
+  TableCaption,
+} from "./table";
+import {
+  getByteLengthFromScanType,
+  arrayBufferToLittleEndianHexString,
+  convertFromLittleEndianHex,
+} from "../../lib/converter";
+import { readProcessMemory } from "../../lib/api";
+import { useStore } from "../global-store";
 
 const CustomTable = forwardRef((props, ref) => {
   const {
@@ -16,66 +31,183 @@ const CustomTable = forwardRef((props, ref) => {
     selectedIndices,
     handleSelect,
     dataType,
-    convertFromLittleEndianHex,
+    setScanResults,
   } = props;
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(1000);
 
-  const handleChangePage = (event, newPage) => {
-    setPage(newPage);
+  const [visibleRange, setVisibleRange] = useState({
+    startIndex: 0,
+    stopIndex: 0,
+  });
+  const ipAddress = useStore((state) => state.ipAddress);
+  const [isMobile, setIsMobile] = useState(false);
+
+  const rowGetter = ({ index }) => scanResults[index];
+
+  const isRowSelected = (index) => selectedIndices.includes(index + 1);
+
+  const onRowClick = ({ index, rowData }) => {
+    handleSelect(index + 1, rowData.address);
   };
 
-  const handleChangeRowsPerPage = (event) => {
-    setRowsPerPage(+event.target.value);
-    setPage(0);
+  const cellRenderer = useCallback(
+    ({ cellData, columnIndex, rowIndex }) => {
+      const rowData = scanResults[rowIndex];
+      switch (columnIndex) {
+        case 0:
+          return (
+            <TableCell
+              className={`${
+                isMobile ? "" : "p-4"
+              } align-middle text-sm font-sans`}
+            >
+              {rowIndex + 1}
+            </TableCell>
+          );
+        case 1:
+          return (
+            <TableCell
+              className={`${
+                isMobile ? "" : "p-4"
+              } align-middle text-sm font-mono`}
+            >{`0x${BigInt(rowData.address)
+              .toString(16)
+              .toUpperCase()}`}</TableCell>
+          );
+        case 2:
+          return (
+            <TableCell
+              className={`${
+                isMobile ? "" : "p-4"
+              } align-middle text-sm font-sans`}
+            >
+              {convertFromLittleEndianHex(rowData.value, dataType)}
+            </TableCell>
+          );
+        default:
+          return null;
+      }
+    },
+    [convertFromLittleEndianHex, dataType, scanResults]
+  );
+
+  const headerRenderer = ({ label }) => (
+    <div
+      className={`h-12 ${
+        isMobile ? "justify-center" : "px-6"
+      } text-center font-medium text-gray-100 bg-blue-800 flex items-center mx-0`}
+    >
+      {label}
+    </div>
+  );
+
+  const rowClassName = ({ index }) => {
+    const baseClass = "border-b transition-colors";
+    const selectedClass =
+      "bg-blue-100 dark:bg-blue-900 hover:bg-blue-200 dark:hover:bg-blue-800";
+    const defaultClass = "hover:bg-gray-50 dark:hover:bg-gray-900";
+    return index !== -1 && isRowSelected(index)
+      ? `${baseClass} ${selectedClass}`
+      : `${baseClass} ${defaultClass}`;
   };
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth <= 640);
+    };
+
+    window.addEventListener("resize", handleResize);
+
+    handleResize();
+
+    const updateDisplayedRows = async () => {
+      const { startIndex, stopIndex } = visibleRange;
+
+      for (let i = startIndex; i <= stopIndex; i++) {
+        const result = scanResults[i];
+        if (result) {
+          try {
+            const memoryData = await readProcessMemory(
+              ipAddress,
+              result.address,
+              getByteLengthFromScanType(dataType, result.value)
+            );
+            let updatedValue = "";
+            if (memoryData == null) {
+              updatedValue = "???????";
+            } else {
+              updatedValue = arrayBufferToLittleEndianHexString(memoryData);
+            }
+            setScanResults((prevResults) =>
+              prevResults.map((item) =>
+                item.address === result.address
+                  ? { ...item, value: updatedValue }
+                  : item
+              )
+            );
+          } catch (error) {
+            console.error("Error updating memory value:", error);
+          }
+        }
+      }
+    };
+
+    const interval = setInterval(updateDisplayedRows, 1000);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [scanResults, dataType, setScanResults, visibleRange]);
 
   return (
-    <Paper>
-      <TableContainer ref={ref} style={{ maxHeight: 440 }}>
-        <Table stickyHeader aria-label="sticky table">
-          <TableHead>
-            <TableRow>
-              <TableCell>Index</TableCell>
-              <TableCell>Address</TableCell>
-              <TableCell>Value</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {scanResults
-              .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
-              .map((result, index) => (
-                <TableRow
-                  key={index}
-                  selected={selectedIndices.includes(
-                    page * rowsPerPage + index + 1
-                  )}
-                  onClick={() =>
-                    handleSelect(page * rowsPerPage + index + 1, result.address)
-                  }
-                >
-                  <TableCell>{page * rowsPerPage + index + 1}</TableCell>
-                  <TableCell>
-                    {`0x${BigInt(result.address).toString(16).toUpperCase()}`}
-                  </TableCell>
-                  <TableCell>
-                    {convertFromLittleEndianHex(result.value, dataType)}
-                  </TableCell>
-                </TableRow>
-              ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
-      <TablePagination
-        rowsPerPageOptions={[100, 500, 1000]}
-        component="div"
-        count={scanResults.length}
-        rowsPerPage={rowsPerPage}
-        page={page}
-        onPageChange={handleChangePage}
-        onRowsPerPageChange={handleChangeRowsPerPage}
-      />
-    </Paper>
+    <div ref={ref} className="w-full h-96">
+      <AutoSizer>
+        {({ height, width }) => (
+          <RVTable
+            width={width}
+            height={height}
+            headerHeight={40}
+            rowHeight={40}
+            rowCount={scanResults.length}
+            rowGetter={rowGetter}
+            onRowClick={onRowClick}
+            rowClassName={rowClassName}
+            onRowsRendered={({ startIndex, stopIndex }) =>
+              setVisibleRange({ startIndex, stopIndex })
+            }
+            gridStyle={{
+              overflowX: "hidden",
+              overflowY: "auto",
+            }}
+            className="border-b border-gray-200"
+          >
+            <Column
+              label="Index"
+              dataKey="index"
+              width={width * 0.2}
+              cellRenderer={cellRenderer}
+              headerRenderer={headerRenderer}
+              className="border-r border-gray-300"
+            />
+            <Column
+              label="Address"
+              dataKey="address"
+              width={width * 0.4}
+              cellRenderer={cellRenderer}
+              headerRenderer={headerRenderer}
+              className="border-r border-gray-300"
+            />
+            <Column
+              label="Value"
+              dataKey="value"
+              width={width * 0.4}
+              cellRenderer={cellRenderer}
+              headerRenderer={headerRenderer}
+            />
+          </RVTable>
+        )}
+      </AutoSizer>
+    </div>
   );
 });
 

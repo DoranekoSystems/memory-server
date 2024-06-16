@@ -63,3 +63,7 @@ body {
 .memorydata.inactive {
   pointer-events: none;
 }
+
+.ReactVirtualized__Table__headerColumn {
+  margin: 0 !important;
+}

@@ -54,61 +54,7 @@ export function Scanner() {
   const [patchValue, setPatchValue] = useState("");
   const tableRef = useRef(null);
 
-  useEffect(() => {
-    const updateDisplayedRows = async () => {
-      if (tableRef.current) {
-        const tableRect = tableRef.current.getBoundingClientRect();
-        const rows = tableRef.current.querySelectorAll("tbody tr");
-
-        for (let i = 0; i < rows.length; i++) {
-          const row = rows[i];
-          const rowRect = row.getBoundingClientRect();
-
-          if (rowRect.top >= tableRect.top) {
-            const startIndex = Number(row.children[0].textContent) - 1;
-            const endIndex = Math.min(startIndex + 20, scanResults.length);
-
-            for (let j = startIndex; j < endIndex; j++) {
-              const result = scanResults[j];
-              if (result) {
-                try {
-                  const memoryData = await readProcessMemory(
-                    ipAddress,
-                    result.address,
-                    getByteLengthFromScanType(dataType, result.value)
-                  );
-                  let updatedValue = "";
-                  if (memoryData == null) {
-                    updatedValue = "???????";
-                  } else {
-                    updatedValue =
-                      arrayBufferToLittleEndianHexString(memoryData);
-                  }
-                  setScanResults((prevResults) =>
-                    prevResults.map((item) =>
-                      item.address === result.address
-                        ? { ...item, value: updatedValue }
-                        : item
-                    )
-                  );
-                } catch (error) {
-                  console.error("Error updating memory value:", error);
-                }
-              }
-            }
-
-            break;
-          }
-        }
-      }
-    };
-
-    const interval = setInterval(updateDisplayedRows, 1000);
-
-    return () => {
-      clearInterval(interval);
-    };
-  }, [loading, scanResults, ipAddress, dataType]);
+  useEffect(() => {}, [loading, scanResults, ipAddress, dataType]);
 
   const handleSelect = (index, address) => {
     setSelectedIndices((prevIndices) => {
@@ -175,7 +121,9 @@ export function Scanner() {
 
   const handleFind = async () => {
     try {
-      if (scanValue == "") return;
+      if (scanValue == "" && findType != "unknown") {
+        return;
+      }
       setIsFirstScan(false);
       setIsLoading(true);
       setIsFinding(true);
@@ -468,11 +416,15 @@ export function Scanner() {
         <Card className="w-full max-w-4xl mb-6">
           <CardHeader>
             <CardTitle className="text-2xl">Scan Data List</CardTitle>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Showing {scanResults.length} results
+            </p>
           </CardHeader>
-          <CardContent className="max-h-[500px]">
+          <CardContent className="overflow-y-auto max-h-[500px]">
             <CustomTable
               ref={tableRef}
               scanResults={scanResults}
+              setScanResults={setScanResults}
               selectedIndices={selectedIndices}
               handleSelect={handleSelect}
               dataType={dataType}

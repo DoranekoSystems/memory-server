@@ -1,3 +1,4 @@
+#include <Foundation/Foundation.h>
 #include <errno.h>
 #include <mach-o/dyld_images.h>
 #include <mach/mach.h>
@@ -7,6 +8,7 @@
 #include <stdlib.h>
 #include <sys/queue.h>
 #include <sys/sysctl.h>
+
 typedef struct {
   int pid;
   char *processname;
@@ -23,9 +25,23 @@ extern "C" kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
 extern "C" kern_return_t mach_vm_protect(vm_map_t, mach_vm_address_t,
                                          mach_vm_size_t, boolean_t, vm_prot_t);
 
-extern "C" kern_return_t
-mach_vm_region(vm_map_t, mach_vm_address_t, mach_vm_size_t, vm_region_flavor_t,
-               vm_region_info_t, mach_msg_type_number_t *, mach_port_t *);
+extern "C" kern_return_t mach_vm_region(vm_map_t, mach_vm_address_t *,
+                                        mach_vm_size_t *, vm_region_flavor_t,
+                                        vm_region_info_t,
+                                        mach_msg_type_number_t *,
+                                        mach_port_t *);
+
+int debug_log(const char *format, ...) {
+  va_list list;
+  va_start(list, format);
+  NSString *originalFormatString = [NSString stringWithUTF8String:format];
+  NSString *taggedFormatString =
+      [NSString stringWithFormat:@"[MEMORYSERVER] %@", originalFormatString];
+
+  NSLogv(taggedFormatString, list);
+  va_end(list);
+  return 0;
+}
 
 extern "C" pid_t get_pid_native() { return getpid(); }
 
@@ -68,36 +84,63 @@ extern "C" ssize_t write_memory_native(int pid, mach_vm_address_t address,
   } else {
     err = task_for_pid(mach_task_self(), pid, &task);
     if (err != KERN_SUCCESS) {
+      debug_log("Error: task_for_pid failed with error %d (%s)\n", err,
+                mach_error_string(err));
       return -1;
     }
   }
 
+  task_suspend(task);
+
+  mach_vm_address_t region_address = address;
+  mach_vm_size_t region_size = size;
   // Get the current protection
-  err = mach_vm_region(task, address, size, VM_REGION_BASIC_INFO_64,
-                       (vm_region_info_t)&info, &info_count, &object_name);
+  err = mach_vm_region(task, &region_address, &region_size,
+                       VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info,
+                       &info_count, &object_name);
   if (err != KERN_SUCCESS) {
+    debug_log("Error: mach_vm_region failed with error %d (%s) at address "
+              "0x%llx, size 0x%llx\n",
+              err, mach_error_string(err), address, size);
+    task_resume(task);
     return -1;
   }
   original_protection = info.protection;
 
   // Change the memory protection to allow writing
-  err = mach_vm_protect(task, address, size, FALSE,
-                        VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+  err =
+      mach_vm_protect(task, address, size, false, VM_PROT_READ | VM_PROT_WRITE);
   if (err != KERN_SUCCESS) {
+    debug_log(
+        "Error: mach_vm_protect (write enable) failed with error %d (%s)\n",
+        err, mach_error_string(err));
+    task_resume(task);
     return -1;
   }
 
+  // Write to memory
   err = mach_vm_write(task, address, (vm_offset_t)buffer, size);
   if (err != KERN_SUCCESS) {
+    debug_log("Error: mach_vm_write failed with error %d (%s) at address "
+              "0x%llx, size 0x%llx\n",
+              err, mach_error_string(err), address, size);
+    mach_vm_protect(task, address, size, false,
+                    original_protection); // Attempt to restore protection
+    task_resume(task);
     return -1;
   }
 
   // Reset the memory protection
-  err = mach_vm_protect(task, address, size, FALSE, original_protection);
+  err = mach_vm_protect(task, address, size, false, original_protection);
   if (err != KERN_SUCCESS) {
+    debug_log("Warning: mach_vm_protect (restore protection) failed with error "
+              "%d (%s)\n",
+              err, mach_error_string(err));
+    task_resume(task);
     return -1;
   }
 
+  task_resume(task);
   return size;
 }
 

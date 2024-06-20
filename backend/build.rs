@@ -9,7 +9,7 @@ fn main() {
     if cfg!(windows) {
         println!("cargo:rustc-cfg=host_os=\"windows\"");
     }
-    
+
     if target_os == "windows" {
         build.flag("/std:c++17").flag("/W4").flag("/Zi");
     } else {
@@ -20,12 +20,12 @@ fn main() {
             build.file("src/cpp/src/native_windows.cpp");
         }
         "macos" => {
-            build.file("src/cpp/src/native_darwin.cpp");
+            build.file("src/cpp/src/native_darwin.mm");
         }
         "ios" => {
-            build.file("src/cpp/src/native_darwin.cpp");
+            build.file("src/cpp/src/native_darwin.mm");
         }
-        "android" => {     
+        "android" => {
             build.cpp_link_stdlib("stdc++");
             println!("cargo:rustc-link-lib=static=c++_static");
             println!("cargo:rustc-link-lib=static=c++abi");

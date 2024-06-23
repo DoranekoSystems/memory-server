@@ -1,3 +1,4 @@
+use crate::api::lz4::EncoderBuilder;
 use crate::util;
 use crate::util::binary_search;
 use aho_corasick::AhoCorasick;
@@ -7,6 +8,7 @@ use lazy_static::lazy_static;
 use libc::int8_t;
 use libc::{self, c_char, c_int, c_long, c_void, off_t, O_RDONLY};
 use lz4;
+use lz4::{block::compress, BlockMode};
 use memchr::{memmem, Memchr};
 use rayon::prelude::*;
 use regex::bytes::Regex;
@@ -24,6 +26,7 @@ use std::sync::RwLock;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use warp::hyper::Body;
+use warp::redirect::found;
 use warp::{http::Response, http::StatusCode, Filter, Rejection, Reply};
 
 #[cfg_attr(target_os = "android", link(name = "c++_static", kind = "static"))]
@@ -56,7 +59,9 @@ struct ProcessInfo {
 lazy_static! {
     static ref GLOBAL_POSITIONS: RwLock<HashMap<String, Vec<(usize, String)>>> =
         RwLock::new(HashMap::new());
-    static ref GLOBAL_MEMORY: RwLock<HashMap<String, Vec<(usize, Vec<u8>)>>> =
+    static ref GLOBAL_MEMORY: RwLock<HashMap<String, Vec<(usize, Vec<u8>, usize, Vec<u8>, usize, bool)>>> =
+        RwLock::new(HashMap::new());
+    static ref GLOBAL_SCAN_OPTION: RwLock<HashMap<String, MemoryScanRequest>> =
         RwLock::new(HashMap::new());
 }
 
@@ -226,7 +231,7 @@ pub async fn write_memory_handler(
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct MemoryScanRequest {
     pattern: String,
     address_ranges: Vec<(usize, usize)>,
@@ -249,8 +254,14 @@ pub async fn memory_scan_handler(
             let mut global_positions = GLOBAL_POSITIONS.write().unwrap();
             if let Some(positions) = global_positions.get_mut(&scan_request.scan_id) {
                 positions.clear();
+            }
+            let mut global_memory = GLOBAL_MEMORY.write().unwrap();
+            if let Some(memory) = global_memory.get_mut(&scan_request.scan_id) {
+                memory.clear();
             } else {
             }
+            let mut global_scan_option = GLOBAL_SCAN_OPTION.write().unwrap();
+            global_scan_option.insert(scan_request.scan_id.clone(), scan_request.clone());
         }
         let is_number = match scan_request.data_type.as_str() {
             "int16" | "uint16" | "int32" | "uint32" | "float" | "int64" | "uint64" | "double" => {
@@ -266,7 +277,7 @@ pub async fn memory_scan_handler(
             .flat_map(|(start_address, end_address)| {
                 let found_count = Arc::clone(&found_count);
                 let size = end_address - start_address;
-                let chunk_size = 1024 * 1024 * 512; // 512MB
+                let chunk_size = 1024 * 1024 * 32; // 32MB
                 let num_chunks = (size + chunk_size - 1) / chunk_size;
 
                 (0..num_chunks)
@@ -338,31 +349,33 @@ pub async fn memory_scan_handler(
                                     "int64" | "uint64" | "double" => 8,
                                     _ => 1,
                                 };
+                                let mut global_memory = GLOBAL_MEMORY.write().unwrap();
+                                let compressed_buffer =
+                                    lz4::block::compress(&buffer, None, false).unwrap();
 
-                                for offset in (0..buffer.len() - alignment + 1).step_by(alignment) {
-                                    let end = offset + alignment;
-                                    if end > buffer.len() {
-                                        break;
-                                    }
-                                    if (chunk_start + offset) % scan_align == 0 {
-                                        let bytes = &buffer[offset..end];
-                                        let num = match alignment {
-                                            2 => LittleEndian::read_u16(bytes) as u64,
-                                            4 => LittleEndian::read_u32(bytes) as u64,
-                                            8 => LittleEndian::read_u64(bytes),
-                                            _ => bytes[0] as u64,
-                                        };
-                                        let hex_string = match alignment {
-                                            2 => hex::encode((num as u16).to_le_bytes()),
-                                            4 => hex::encode((num as u32).to_le_bytes()),
-                                            8 => hex::encode((num as u64).to_le_bytes()),
-                                            _ => hex::encode([num as u8]),
-                                        };
-                                        local_positions.push(chunk_start + offset);
-                                        local_values.push(hex_string);
-                                        found_count.fetch_add(1, Ordering::SeqCst);
-                                    }
+                                if let Some(memory) = global_memory.get_mut(&scan_request.scan_id) {
+                                    memory.push((
+                                        chunk_start,
+                                        compressed_buffer,
+                                        buffer.len(),
+                                        vec![],
+                                        0,
+                                        true,
+                                    ));
+                                } else {
+                                    global_memory.insert(
+                                        scan_request.scan_id.clone(),
+                                        vec![(
+                                            chunk_start,
+                                            compressed_buffer,
+                                            buffer.len(),
+                                            vec![],
+                                            0,
+                                            true,
+                                        )],
+                                    );
                                 }
+                                found_count.fetch_add(buffer.len() / alignment, Ordering::SeqCst);
                             }
                             // Check if local_positions exceed MAX_RESULTS and insert into global_positions
                             if local_positions.len() > MAX_RESULTS {
@@ -410,7 +423,17 @@ pub async fn memory_scan_handler(
             let global_positions = GLOBAL_POSITIONS.read().unwrap();
             if let Some(positions) = global_positions.get(&scan_request.scan_id) {
                 let limited_positions = &positions[..std::cmp::min(MAX_RESULTS, positions.len())];
-                let is_rounded = limited_positions.len() != positions.len();
+                let count = found_count.load(Ordering::SeqCst);
+                let mut is_rounded: bool;
+                if scan_request.find_type == "unknown" {
+                    if count > 1_000_000 {
+                        is_rounded = true;
+                    } else {
+                        is_rounded = limited_positions.len() != positions.len();
+                    }
+                } else {
+                    is_rounded = limited_positions.len() != positions.len();
+                }
                 let matched_addresses: Vec<serde_json::Value> = limited_positions
                     .clone()
                     .into_iter()
@@ -421,7 +444,6 @@ pub async fn memory_scan_handler(
                         })
                     })
                     .collect();
-                let count = found_count.load(Ordering::SeqCst);
                 let result = json!({
                     "matched_addresses": matched_addresses,
                     "found":count,
@@ -497,7 +519,174 @@ pub async fn memory_filter_handler(
     if let Some(pid) = *pid {
         let mut new_positions = Vec::new();
         let mut global_positions = GLOBAL_POSITIONS.write().unwrap();
-        if let Some(positions) = global_positions.get(&filter_request.scan_id) {
+        let mut global_memory = GLOBAL_MEMORY.write().unwrap();
+        let mut global_scan_option = GLOBAL_SCAN_OPTION.write().unwrap();
+        let scan_option: MemoryScanRequest = global_scan_option
+            .get(&filter_request.scan_id)
+            .unwrap()
+            .clone();
+        let found_count = Arc::new(AtomicUsize::new(0));
+        let size = match filter_request.data_type.as_str() {
+            "int16" | "uint16" => 2,
+            "int32" | "uint32" | "float" => 4,
+            "int64" | "uint64" | "double" => 8,
+            _ => 1,
+        };
+        // unknown search
+        if let Some(memory) = global_memory.get_mut(&filter_request.scan_id) {
+            let scan_align = scan_option.align;
+            memory.par_iter_mut().for_each(|entry| {
+                let (
+                    address,
+                    compressed_data,
+                    uncompressed_data_size,
+                    compressed_offsets,
+                    uncompressed_offsets_size,
+                    is_first,
+                ) = entry;
+                let mut local_positions = vec![];
+                let decompressed_data =
+                    lz4::block::decompress(compressed_data, Some(*uncompressed_data_size as i32))
+                        .unwrap();
+                let mut decompressed_offsets: Vec<i32>;
+                let mut buffer: Vec<u8> = vec![0; (decompressed_data.len()) as usize];
+                let _nread = match read_process_memory(
+                    pid,
+                    *address as *mut libc::c_void,
+                    decompressed_data.len(),
+                    &mut buffer,
+                ) {
+                    Ok(nread) => nread,
+                    Err(err) => -1,
+                };
+
+                if _nread == -1 {
+                    return;
+                }
+
+                if *is_first {
+                    for offset in (0..decompressed_data.len()).step_by(1) {
+                        if (*address + offset) % scan_align != 0 {
+                            continue;
+                        }
+                        if offset + size > decompressed_data.len() {
+                            break;
+                        }
+                        let old_val = &decompressed_data[offset..offset + size];
+                        let new_val = &buffer[offset..offset + size];
+
+                        let pass_filter = match filter_request.data_type.as_str() {
+                            _ => compare_values!(
+                                new_val,
+                                old_val,
+                                filter_request.filter_method.as_str()
+                            ),
+                        };
+                        if pass_filter {
+                            local_positions.push(offset);
+                            found_count.fetch_add(1, Ordering::SeqCst);
+                        }
+                    }
+                    let offsets_as_bytes: Vec<u8> = local_positions
+                        .iter()
+                        .flat_map(|&x| x.to_le_bytes().to_vec())
+                        .collect();
+                    *compressed_offsets = compress(&offsets_as_bytes, None, false).unwrap();
+                    *uncompressed_offsets_size =
+                        local_positions.len() * std::mem::size_of::<usize>();
+                    *is_first = false;
+                    let compressed_buffer = lz4::block::compress(&buffer, None, false).unwrap();
+                    *compressed_data = compressed_buffer.clone();
+                    *uncompressed_data_size = buffer.len();
+                } else {
+                    let decompressed_offsets_buffer = lz4::block::decompress(
+                        compressed_offsets,
+                        Some(*uncompressed_offsets_size as i32),
+                    )
+                    .unwrap();
+
+                    let decompressed_offsets: Vec<usize> = decompressed_offsets_buffer
+                        .chunks_exact(8)
+                        .map(|chunk| usize::from_le_bytes(chunk.try_into().unwrap()))
+                        .collect();
+                    for offset in decompressed_offsets {
+                        if (*address + offset) % scan_align != 0 {
+                            continue;
+                        }
+                        if offset + size > decompressed_data.len() {
+                            break;
+                        }
+                        let old_val = &decompressed_data[offset..offset + size];
+                        let new_val = &buffer[offset..offset + size];
+
+                        let pass_filter = match filter_request.data_type.as_str() {
+                            _ => compare_values!(
+                                new_val,
+                                old_val,
+                                filter_request.filter_method.as_str()
+                            ),
+                        };
+                        if pass_filter {
+                            local_positions.push(offset);
+                            found_count.fetch_add(1, Ordering::SeqCst);
+                        }
+                    }
+                    let offsets_as_bytes: Vec<u8> = local_positions
+                        .iter()
+                        .flat_map(|&x| x.to_le_bytes().to_vec())
+                        .collect();
+                    *compressed_offsets = compress(&offsets_as_bytes, None, false).unwrap();
+                    *uncompressed_offsets_size =
+                        local_positions.len() * std::mem::size_of::<usize>();
+                    let compressed_buffer = lz4::block::compress(&buffer, None, false).unwrap();
+                    *compressed_data = compressed_buffer.clone();
+                    *uncompressed_data_size = buffer.len();
+                }
+            });
+            if found_count.load(Ordering::SeqCst) < 1_000_000 {
+                let results: Vec<_> = memory
+                    .par_iter()
+                    .flat_map(
+                        |(
+                            address,
+                            compressed_data,
+                            uncompressed_data_size,
+                            compressed_offsets,
+                            uncompressed_offsets_size,
+                            _,
+                        )| {
+                            let mut local_positions = vec![];
+                            if *uncompressed_offsets_size == 0 {
+                                return local_positions;
+                            }
+
+                            let decompressed_data = lz4::block::decompress(
+                                compressed_data,
+                                Some(*uncompressed_data_size as i32),
+                            )
+                            .unwrap();
+                            let decompressed_offsets_buffer = lz4::block::decompress(
+                                compressed_offsets,
+                                Some(*uncompressed_offsets_size as i32),
+                            )
+                            .unwrap();
+                            let decompressed_offsets: Vec<usize> = decompressed_offsets_buffer
+                                .chunks_exact(8)
+                                .map(|chunk| usize::from_le_bytes(chunk.try_into().unwrap()))
+                                .collect();
+                            for offset in decompressed_offsets {
+                                let val = &decompressed_data[offset..offset + size];
+                                local_positions.push((*address + offset, hex::encode(val)));
+                            }
+                            local_positions
+                        },
+                    )
+                    .collect();
+
+                new_positions = results;
+                global_memory.remove(&filter_request.scan_id);
+            }
+        } else if let Some(positions) = global_positions.get(&filter_request.scan_id) {
             let results: Result<Vec<_>, _> = positions
                 .par_iter()
                 .map(|(address, value)| {
@@ -523,6 +712,7 @@ pub async fn memory_filter_handler(
                             Err(_) => return Ok(None),
                         };
                         if re.is_match(&buffer) {
+                            found_count.fetch_add(1, Ordering::SeqCst);
                             return Ok(Some((*address, hex::encode(&buffer))));
                         }
                     } else {
@@ -539,6 +729,7 @@ pub async fn memory_filter_handler(
                                 }
                             };
                             if buffer == bytes {
+                                found_count.fetch_add(1, Ordering::SeqCst);
                                 return Ok(Some((*address, hex::encode(&buffer))));
                             }
                         } else {
@@ -696,6 +887,7 @@ pub async fn memory_filter_handler(
                             };
 
                             if pass_filter {
+                                found_count.fetch_add(1, Ordering::SeqCst);
                                 return Ok(Some((*address, hex::encode(&buffer))));
                             }
                         }
@@ -723,7 +915,17 @@ pub async fn memory_filter_handler(
         if filter_request.return_as_json {
             let limited_positions =
                 &new_positions[..std::cmp::min(MAX_RESULTS, new_positions.len())];
-            let is_rounded = limited_positions.len() != new_positions.len();
+            let mut is_rounded: bool;
+            let count = found_count.load(Ordering::SeqCst);
+            if scan_option.find_type == "unknown" {
+                if count > 1_000_000 {
+                    is_rounded = true;
+                } else {
+                    is_rounded = limited_positions.len() != new_positions.len();
+                }
+            } else {
+                is_rounded = limited_positions.len() != new_positions.len();
+            }
             let matched_addresses: Vec<serde_json::Value> = new_positions
                 .clone()
                 .iter()
@@ -734,7 +936,7 @@ pub async fn memory_filter_handler(
                     })
                 })
                 .collect();
-            let count = new_positions.len();
+
             let result = json!({
                 "matched_addresses": matched_addresses,
                 "found":count,
@@ -748,7 +950,7 @@ pub async fn memory_filter_handler(
                 .unwrap();
             Ok(response)
         } else {
-            let count = new_positions.len();
+            let count = found_count.load(Ordering::SeqCst);
             let result_string = json!({ "found": count }).to_string();
             let response = Response::builder()
                 .header("Content-Type", "application/json")

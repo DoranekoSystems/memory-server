@@ -278,7 +278,12 @@ export function Scanner({ currentPage }) {
                     </>
                   ) : (
                     <>
-                      <SelectItem value="exact">exact</SelectItem>
+                      {findType === "exact" ||
+                      (findType === "unknown" && scanResultsCount < 1000000) ? (
+                        <SelectItem value="exact">exact</SelectItem>
+                      ) : (
+                        <></>
+                      )}
                       <SelectItem value="changed">changed</SelectItem>
                       <SelectItem value="unchanged">unchanged</SelectItem>
                       <SelectItem value="increased">increased</SelectItem>
@@ -445,8 +450,9 @@ export function Scanner({ currentPage }) {
             <p className="mt-1 text-sm text-muted-foreground">
               {isScanRounded ? (
                 <>
-                  Results limited to 100,000 (Full set:{" "}
-                  {scanResultsCount.toLocaleString()})
+                  {findType === "unknown" && scanResultsCount > 1000000
+                    ? `During unknown search: display only if count is less than 1,000,000 (Current count: ${scanResultsCount.toLocaleString()})`
+                    : `Results limited to 100,000 (Full set: ${scanResultsCount.toLocaleString()})`}
                 </>
               ) : (
                 <>Results: {scanResultsCount.toLocaleString()}</>

@@ -21,13 +21,13 @@ export default function Home() {
         <TopPage />
       </div>
       <div style={{ display: currentPage == "setting" ? "block" : "none" }}>
-        <Setting ipAddress={ipAddress} setIpAddress={setIpAddress} />
+        <Setting currentPage={currentPage} />
       </div>
       <div style={{ display: currentPage == "scanner" ? "block" : "none" }}>
-        <Scanner ipAddress={ipAddress} setIpAddress={setIpAddress} />
+        <Scanner currentPage={currentPage} />
       </div>
       <div style={{ display: currentPage == "memoryview" ? "block" : "none" }}>
-        <MemoryView ipAddress={ipAddress} setIpAddress={setIpAddress} />
+        <MemoryView currentPage={currentPage} />
       </div>
       <Footer></Footer>
     </div>

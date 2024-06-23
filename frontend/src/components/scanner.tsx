@@ -33,7 +33,7 @@ import {
 
 import { getMemoryRegions, readProcessMemory } from "../lib/api";
 
-export function Scanner() {
+export function Scanner({ currentPage }) {
   const [addressRanges, setAddressRanges] = useState<[bigint, bigint][]>([
     [BigInt(0), BigInt("0x7FFFFFFFFFFFFF")],
   ]);

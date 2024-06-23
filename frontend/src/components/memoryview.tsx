@@ -1,3 +1,4 @@
+import axios from "axios";
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,7 +13,7 @@ import {
 } from "@/components/ui/select";
 import { getMemoryRegions, readProcessMemory } from "../lib/api";
 
-export function MemoryView() {
+export function MemoryView({ currentPage }) {
   const [isMobile, setIsMobile] = useState(false);
   const ipAddress = useStore((state) => state.ipAddress);
   const [inputAddress, setInputAddress] = useState("");
@@ -24,6 +25,12 @@ export function MemoryView() {
   const [isDragging, setIsDragging] = useState(false);
   const [isDraggingId, setIsDraggingId] = useState(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [selectedCell, setSelectedCell] = useState({
+    regionId: null,
+    index: 0,
+  });
+  const [cellPosition, setCellPosition] = useState(0);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const handleCloseRegion = (regionId) => {
     setRegions((prevRegions) =>
@@ -31,6 +38,7 @@ export function MemoryView() {
     );
     if (selectedRegion === regionId) {
       setSelectedRegion(null);
+      setSelectedCell({ regionId: null, index: 0 });
     }
   };
 
@@ -171,6 +179,130 @@ export function MemoryView() {
     };
   }, [ipAddress, regions]);
 
+  useEffect(() => {
+    const handleKeyDown = async (event) => {
+      if (currentPage != "memoryview") {
+        return () => {
+          window.removeEventListener("keydown", handleKeyDown);
+        };
+      }
+      if (isProcessing) return;
+      if (selectedCell.regionId !== null) {
+        const cellIndex = selectedCell.index;
+
+        let rowLength = window.innerWidth >= 640 ? 16 : 8;
+        let adjust = 1;
+        const region = regions.find((r) => r.id === selectedCell.regionId);
+
+        switch (region.dataType) {
+          case "byte":
+            rowLength = 16;
+            break;
+          case "word":
+            rowLength = 8;
+            adjust = 2;
+            break;
+          case "dword":
+            rowLength = 4;
+            adjust = 4;
+            break;
+          case "qword":
+            rowLength = 2;
+            adjust = 8;
+            break;
+          default:
+            rowLength = 16;
+        }
+
+        setIsProcessing(true);
+        try {
+          switch (event.key) {
+            case "ArrowUp":
+              event.preventDefault();
+              setSelectedCell((prevCell) => ({
+                ...prevCell,
+                index: Math.max(0, cellIndex - rowLength),
+              }));
+              setCellPosition(0);
+              break;
+            case "ArrowDown":
+              event.preventDefault();
+              setSelectedCell((prevCell) => ({
+                ...prevCell,
+                index: Math.min(
+                  Math.floor(region.memoryData.byteLength / adjust) - 1,
+                  cellIndex + rowLength
+                ),
+              }));
+              setCellPosition(0);
+              break;
+            case "ArrowLeft":
+              setSelectedCell((prevCell) => ({
+                ...prevCell,
+                index: Math.max(0, cellIndex - 1),
+              }));
+              setCellPosition(0);
+              break;
+            case "ArrowRight":
+              setSelectedCell((prevCell) => ({
+                ...prevCell,
+                index: Math.min(
+                  Math.floor(region.memoryData.byteLength / adjust) - 1,
+                  cellIndex + 1
+                ),
+              }));
+              setCellPosition(0);
+              break;
+            case "1":
+            case "2":
+            case "3":
+            case "4":
+            case "5":
+            case "6":
+            case "7":
+            case "8":
+            case "9":
+            case "0":
+            case "a":
+            case "b":
+            case "c":
+            case "d":
+            case "e":
+            case "f":
+              if (region.displayType == "hex") {
+                await handleEdit(selectedCell.regionId, cellIndex, event.key);
+                if (cellPosition == adjust * 2 - 1) {
+                  setSelectedCell((prevCell) => ({
+                    ...prevCell,
+                    index: Math.min(
+                      Math.floor(region.memoryData.byteLength / adjust) - 1,
+                      cellIndex + 1
+                    ),
+                  }));
+                  setCellPosition(0);
+                } else {
+                  setCellPosition(
+                    (prevPosition) =>
+                      ((prevPosition % (adjust * 2)) + 1) % (adjust * 2)
+                  );
+                }
+              }
+              break;
+            default:
+              break;
+          }
+        } finally {
+          setIsProcessing(false);
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [selectedCell, regions, isProcessing]);
+
   const addRegion = () => {
     const newRegion = {
       id: Date.now(),
@@ -183,6 +315,7 @@ export function MemoryView() {
     };
     setRegions([...regions, newRegion]);
     setSelectedRegion(newRegion.id);
+    setSelectedCell({ regionId: newRegion.id, index: 0 });
   };
 
   const selectRegion = (regionId) => {
@@ -202,6 +335,7 @@ export function MemoryView() {
       };
     });
   };
+
   const getSelectedRegion = () => {
     return regions.find((region) => region.id === selectedRegion);
   };
@@ -218,6 +352,11 @@ export function MemoryView() {
     setIsAddressChangedWithTimeout();
   };
 
+  const handleCellClick = (regionId, index) => {
+    setSelectedCell({ regionId, index });
+    setCellPosition(0);
+  };
+
   const renderMemoryData = (region) => {
     if (!region || !region.memoryData) return null;
 
@@ -227,15 +366,6 @@ export function MemoryView() {
       : null;
     const lines = [];
 
-    if (window.innerWidth < 640) {
-      lines.push(
-        <div key="address" className="font-mono text-sm">
-          <pre className="tabular-nums w-12 mr-2">
-            address {region.address.toString(16).padStart(8, "0")}
-          </pre>
-        </div>
-      );
-    }
     let loopCount;
     let length;
     if (window.innerWidth >= 640) {
@@ -245,6 +375,24 @@ export function MemoryView() {
       loopCount = 0xff;
       length = 8;
     }
+
+    let adjust = 1;
+    switch (region.dataType) {
+      case "byte":
+        adjust = 1;
+        break;
+      case "word":
+        adjust = 2;
+        break;
+      case "dword":
+        adjust = 4;
+        break;
+      case "qword":
+        adjust = 8;
+        break;
+      default:
+    }
+
     for (let i = 0; i < loopCount; i += length) {
       let hexBytes;
       let hexBytesWidth;
@@ -257,12 +405,26 @@ export function MemoryView() {
               prevByte !== null && prevByte !== byte && !isAddressChanged
                 ? "text-red-500"
                 : "text-white";
-            return `<span class="${color}">${
-              region.displayType === "hex"
-                ? byte.toString(16).padStart(2, "0").toUpperCase()
-                : byte.toString(10).padStart(3, " ")
-            }</span>`;
-          }).join(" ");
+            const background =
+              selectedCell.regionId === region.id &&
+              selectedCell.index === i + index
+                ? "bg-blue-500"
+                : "";
+            return (
+              <span
+                key={index}
+                className={`${color} ${background}`}
+                onClick={() =>
+                  handleCellClick(region.id, Math.floor(i / adjust) + index)
+                }
+                style={{ marginRight: "6px" }}
+              >
+                {region.displayType === "hex"
+                  ? byte.toString(16).padStart(2, "0").toUpperCase()
+                  : byte.toString(10).padStart(3, " ")}
+              </span>
+            );
+          });
           hexBytesWidth =
             window.innerWidth >= 640
               ? region.displayType === "hex"
@@ -283,13 +445,27 @@ export function MemoryView() {
                 prevWord !== null && prevWord !== word && !isAddressChanged
                   ? "text-red-500"
                   : "text-white";
-              return `<span class="${color}">${
-                region.displayType === "hex"
-                  ? word.toString(16).padStart(4, "0").toUpperCase()
-                  : word.toString(10).padStart(5, " ")
-              }</span>`;
+              const background =
+                selectedCell.regionId === region.id &&
+                selectedCell.index * adjust === i + index * adjust
+                  ? "bg-blue-500"
+                  : "";
+              return (
+                <span
+                  key={index}
+                  className={`${color} ${background}`}
+                  onClick={() =>
+                    handleCellClick(region.id, Math.floor(i / adjust) + index)
+                  }
+                  style={{ marginRight: "14px" }}
+                >
+                  {region.displayType === "hex"
+                    ? word.toString(16).padStart(4, "0").toUpperCase()
+                    : word.toString(10).padStart(5, " ")}
+                </span>
+              );
             }
-          ).join(" ");
+          );
           hexBytesWidth =
             window.innerWidth >= 640
               ? region.displayType === "hex"
@@ -310,13 +486,27 @@ export function MemoryView() {
                 prevDword !== null && prevDword !== dword && !isAddressChanged
                   ? "text-red-500"
                   : "text-white";
-              return `<span class="${color}">${
-                region.displayType === "hex"
-                  ? dword.toString(16).padStart(8, "0").toUpperCase()
-                  : dword.toString(10).padStart(10, " ")
-              }</span>`;
+              const background =
+                selectedCell.regionId === region.id &&
+                selectedCell.index * adjust === i + index * adjust
+                  ? "bg-blue-500"
+                  : "";
+              return (
+                <span
+                  key={index}
+                  className={`${color} ${background}`}
+                  onClick={() =>
+                    handleCellClick(region.id, Math.floor(i / adjust) + index)
+                  }
+                  style={{ marginRight: "20px" }}
+                >
+                  {region.displayType === "hex"
+                    ? dword.toString(16).padStart(8, "0").toUpperCase()
+                    : dword.toString(10).padStart(10, " ")}
+                </span>
+              );
             }
-          ).join(" ");
+          );
           hexBytesWidth =
             window.innerWidth >= 640
               ? region.displayType === "hex"
@@ -339,13 +529,27 @@ export function MemoryView() {
                 prevQword !== null && prevQword !== qword && !isAddressChanged
                   ? "text-red-500"
                   : "text-white";
-              return `<span class="${color}">${
-                region.displayType === "hex"
-                  ? qword.toString(16).padStart(16, "0").toUpperCase()
-                  : qword.toString(10).padStart(20, " ")
-              }</span>`;
+              const background =
+                selectedCell.regionId === region.id &&
+                selectedCell.index * adjust === i + index * adjust
+                  ? "bg-blue-500"
+                  : "";
+              return (
+                <span
+                  key={index}
+                  className={`${color} ${background}`}
+                  onClick={() =>
+                    handleCellClick(region.id, Math.floor(i / adjust) + index)
+                  }
+                  style={{ marginRight: "26px" }}
+                >
+                  {region.displayType === "hex"
+                    ? qword.toString(16).padStart(16, "0").toUpperCase()
+                    : qword.toString(10).padStart(20, " ")}
+                </span>
+              );
             }
-          ).join(" ");
+          );
           hexBytesWidth =
             window.innerWidth >= 640
               ? region.displayType === "hex"
@@ -362,12 +566,23 @@ export function MemoryView() {
               prevByte !== null && prevByte !== byte && !isAddressChanged
                 ? "text-red-500"
                 : "text-white";
-            return `<span class="${color}">${
-              region.displayType === "hex"
-                ? byte.toString(16).padStart(2, "0").toUpperCase()
-                : byte.toString(10).padStart(3, "0")
-            }</span>`;
-          }).join(" ");
+            const background =
+              selectedCell.regionId === region.id &&
+              selectedCell.index === i + index
+                ? "bg-blue-500"
+                : "";
+            return (
+              <span
+                key={index}
+                className={`${color} ${background}`}
+                onClick={() => handleCellClick(region.id, i + index)}
+              >
+                {region.displayType === "hex"
+                  ? byte.toString(16).padStart(2, "0").toUpperCase()
+                  : byte.toString(10).padStart(3, " ")}
+              </span>
+            );
+          });
           hexBytesWidth =
             window.innerWidth >= 640
               ? region.displayType === "hex"
@@ -387,10 +602,23 @@ export function MemoryView() {
             prevByte !== null && prevByte !== byte && !isAddressChanged
               ? "text-red-500"
               : "text-white";
-          return `<span class="${color}">${
-            byte >= 32 && byte <= 126 ? String.fromCharCode(byte) : "."
-          }</span>`;
-        }).join("");
+          const background =
+            selectedCell.regionId === region.id &&
+            selectedCell.index === Math.floor((i + index) / adjust)
+              ? "bg-blue-500"
+              : "";
+          return (
+            <span
+              key={index}
+              className={`${color} ${background}`}
+              onClick={() =>
+                handleCellClick(region.id, Math.floor((i + index) / adjust))
+              }
+            >
+              {byte >= 32 && byte <= 126 ? String.fromCharCode(byte) : "."}
+            </span>
+          );
+        });
       } else if (region.encoding === "utf-16") {
         asciiBytes = Array.from(
           new Uint16Array(bytes.slice(i, i + length).buffer),
@@ -402,11 +630,31 @@ export function MemoryView() {
               prevWord !== null && prevWord !== word && !isAddressChanged
                 ? "text-red-500"
                 : "text-white";
-            return `<span class="${color}">${
-              word >= 32 && word <= 126 ? String.fromCharCode(word) : "."
-            }</span>`;
+            const background =
+              selectedCell.regionId === region.id &&
+              (region.dataType === "byte"
+                ? Math.floor(selectedCell.index / 2) ===
+                  Math.floor((i + index * 2) / 2)
+                : Math.floor((selectedCell.index / adjust) * adjust) ===
+                  Math.floor((i + index * 2) / adjust))
+                ? "bg-blue-500"
+                : "";
+            return (
+              <span
+                key={index}
+                className={`${color} ${background}`}
+                onClick={() =>
+                  handleCellClick(
+                    region.id,
+                    Math.floor((i + index * 2) / adjust)
+                  )
+                }
+              >
+                {word >= 32 && word <= 126 ? String.fromCharCode(word) : "."}
+              </span>
+            );
           }
-        ).join("");
+        );
       }
 
       if (window.innerWidth >= 640) {
@@ -418,14 +666,8 @@ export function MemoryView() {
                 .padStart(8, "0")
                 .toUpperCase()}
             </pre>
-            <pre
-              className={`tabular-nums${hexBytesWidth}`}
-              dangerouslySetInnerHTML={{ __html: hexBytes }}
-            ></pre>
-            <pre
-              className="ml-2"
-              dangerouslySetInnerHTML={{ __html: asciiBytes }}
-            ></pre>
+            <pre className={`tabular-nums ${hexBytesWidth}`}>{hexBytes}</pre>
+            <pre className="ml-2">{asciiBytes}</pre>
           </div>
         );
       } else {
@@ -434,20 +676,70 @@ export function MemoryView() {
             <pre className="tabular-nums w-10 mr-2">
               {"+" + i.toString(16).padStart(3, "0").toUpperCase()}
             </pre>
-            <pre
-              className={`tabular-nums ${hexBytesWidth}`}
-              dangerouslySetInnerHTML={{ __html: hexBytes }}
-            ></pre>
-            <pre
-              className="ml-2"
-              dangerouslySetInnerHTML={{ __html: asciiBytes }}
-            ></pre>
+            <pre className={`tabular-nums ${hexBytesWidth}`}>{hexBytes}</pre>
+            <pre className="ml-2">{asciiBytes}</pre>
           </div>
         );
       }
     }
 
     return <div className="font-mono text-sm">{lines}</div>;
+  };
+
+  const handleEdit = async (regionId, cellIndex, key) => {
+    const region = getSelectedRegion();
+    let adjust = 0;
+    switch (region.dataType) {
+      case "byte":
+        adjust = 1;
+        break;
+      case "word":
+        adjust = 2;
+        break;
+      case "dword":
+        adjust = 4;
+        break;
+      case "qword":
+        adjust = 8;
+        break;
+      default:
+    }
+    const address =
+      parseInt(region.address) +
+      cellIndex * adjust +
+      adjust -
+      Math.floor(cellPosition / 2) -
+      1;
+    const buffer = new Uint8Array(region.memoryData);
+
+    const newValue = parseInt(key, 16);
+    const currentByteValue =
+      buffer[cellIndex * adjust + adjust - Math.floor(cellPosition / 2) - 1];
+    let newByteValue = 0;
+    if (cellPosition % 2 == 0) {
+      newByteValue = newValue * 0x10 + (currentByteValue & 0x0f);
+    } else {
+      newByteValue = (currentByteValue & 0xf0) + newValue;
+    }
+    const response = await axios.post(`http://${ipAddress}:3030/writememory`, {
+      address: address,
+      buffer: [newByteValue],
+    });
+    // update
+    if (response.status === 200) {
+      buffer[cellIndex * adjust + adjust - Math.floor(cellPosition / 2) - 1] =
+        newByteValue;
+      const updatedRegions = regions.map((r) => {
+        if (r.id === regionId) {
+          return {
+            ...r,
+            memoryData: buffer,
+          };
+        }
+        return r;
+      });
+      setRegions(updatedRegions);
+    }
   };
 
   return (
@@ -523,7 +815,7 @@ export function MemoryView() {
                 <SelectValue placeholder="Select a display type" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="hex">Hexadecimal</SelectItem>
+                <SelectItem value="hex">Hexadecimal(Editable)</SelectItem>
                 <SelectItem value="dec">Decimal</SelectItem>
               </SelectContent>
             </Select>
@@ -575,8 +867,6 @@ export function MemoryView() {
     </div>
   );
 }
-
-// PlusIcon, SaveIcon, and SearchIcon components remain the same
 
 function PlusIcon(props) {
   return (

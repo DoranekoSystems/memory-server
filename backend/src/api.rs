@@ -4,6 +4,7 @@ use aho_corasick::AhoCorasick;
 use byteorder::{ByteOrder, LittleEndian};
 use hex;
 use lazy_static::lazy_static;
+use libc::int8_t;
 use libc::{self, c_char, c_int, c_long, c_void, off_t, O_RDONLY};
 use lz4;
 use memchr::{memmem, Memchr};
@@ -18,6 +19,7 @@ use std::fs::File;
 use std::io::Error;
 use std::io::{BufRead, BufReader};
 use std::str;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::RwLock;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -54,6 +56,8 @@ struct ProcessInfo {
 lazy_static! {
     static ref GLOBAL_POSITIONS: RwLock<HashMap<String, Vec<(usize, String)>>> =
         RwLock::new(HashMap::new());
+    static ref GLOBAL_MEMORY: RwLock<HashMap<String, Vec<(usize, Vec<u8>)>>> =
+        RwLock::new(HashMap::new());
 }
 
 pub fn with_state(
@@ -61,6 +65,8 @@ pub fn with_state(
 ) -> impl Filter<Extract = (Arc<Mutex<Option<i32>>>,), Error = std::convert::Infallible> + Clone {
     warp::any().map(move || state.clone())
 }
+
+const MAX_RESULTS: usize = 100_000;
 
 #[derive(Deserialize)]
 pub struct OpenProcess {
@@ -227,6 +233,7 @@ pub struct MemoryScanRequest {
     find_type: String,
     data_type: String,
     scan_id: String,
+    align: usize,
     return_as_json: bool,
 }
 
@@ -245,10 +252,19 @@ pub async fn memory_scan_handler(
             } else {
             }
         }
+        let is_number = match scan_request.data_type.as_str() {
+            "int16" | "uint16" | "int32" | "uint32" | "float" | "int64" | "uint64" | "double" => {
+                true
+            }
+            _ => false,
+        };
+        let found_count = Arc::new(AtomicUsize::new(0));
+        let scan_align = scan_request.align;
         let thread_results: Vec<Vec<(usize, String)>> = scan_request
             .address_ranges
             .par_iter()
             .flat_map(|(start_address, end_address)| {
+                let found_count = Arc::clone(&found_count);
                 let size = end_address - start_address;
                 let chunk_size = 1024 * 1024 * 512; // 512MB
                 let num_chunks = (size + chunk_size - 1) / chunk_size;
@@ -259,7 +275,9 @@ pub async fn memory_scan_handler(
                         let chunk_end = std::cmp::min(chunk_start + chunk_size, *end_address);
                         let chunk_size_actual = chunk_end - chunk_start;
                         let mut buffer: Vec<u8> = vec![0; chunk_size_actual];
+
                         let mut local_positions = vec![];
+                        let mut local_values = vec![];
 
                         let nread = match read_process_memory(
                             pid,
@@ -268,7 +286,7 @@ pub async fn memory_scan_handler(
                             &mut buffer,
                         ) {
                             Ok(nread) => nread,
-                            Err(err) => -1,
+                            Err(_) => -1,
                         };
 
                         if nread != -1 {
@@ -282,9 +300,13 @@ pub async fn memory_scan_handler(
 
                                     for cap in re.captures_iter(&buffer) {
                                         let start = cap.get(0).unwrap().start();
-                                        let end = cap.get(0).unwrap().end();
-                                        let value = hex::encode(&buffer[start..end]);
-                                        local_positions.push((chunk_start + start, value));
+                                        if (chunk_start + start) % scan_align == 0 {
+                                            let end = cap.get(0).unwrap().end();
+                                            let value = hex::encode(&buffer[start..end]);
+                                            local_positions.push(chunk_start + start);
+                                            local_values.push(value);
+                                            found_count.fetch_add(1, Ordering::SeqCst);
+                                        }
                                     }
                                 } else {
                                     let search_bytes = match hex::decode(&scan_request.pattern) {
@@ -295,8 +317,17 @@ pub async fn memory_scan_handler(
                                     let mut buffer_offset = 0;
                                     for pos in memmem::find_iter(&buffer, &search_bytes) {
                                         let start = chunk_start + buffer_offset + pos;
-                                        let value = scan_request.pattern.clone();
-                                        local_positions.push((start, value));
+                                        if start % scan_align == 0 {
+                                            let value = scan_request.pattern.clone();
+                                            if is_number {
+                                                local_positions.push(start);
+                                                local_values.push(value);
+                                            } else {
+                                                local_positions.push(start);
+                                                local_values.push(value);
+                                            }
+                                            found_count.fetch_add(1, Ordering::SeqCst);
+                                        }
                                         buffer_offset += pos + 1;
                                     }
                                 }
@@ -313,29 +344,56 @@ pub async fn memory_scan_handler(
                                     if end > buffer.len() {
                                         break;
                                     }
-                                    let bytes = &buffer[offset..end];
-                                    let num = match alignment {
-                                        2 => LittleEndian::read_u16(bytes) as u64,
-                                        4 => LittleEndian::read_u32(bytes) as u64,
-                                        8 => LittleEndian::read_u64(bytes),
-                                        _ => bytes[0] as u64,
-                                    };
-                                    let hex_string = match alignment {
-                                        2 => hex::encode((num as u16).to_le_bytes()),
-                                        4 => hex::encode((num as u32).to_le_bytes()),
-                                        8 => hex::encode((num as u64).to_le_bytes()),
-                                        _ => hex::encode([num as u8]),
-                                    };
-                                    local_positions.push((chunk_start + offset, hex_string));
+                                    if (chunk_start + offset) % scan_align == 0 {
+                                        let bytes = &buffer[offset..end];
+                                        let num = match alignment {
+                                            2 => LittleEndian::read_u16(bytes) as u64,
+                                            4 => LittleEndian::read_u32(bytes) as u64,
+                                            8 => LittleEndian::read_u64(bytes),
+                                            _ => bytes[0] as u64,
+                                        };
+                                        let hex_string = match alignment {
+                                            2 => hex::encode((num as u16).to_le_bytes()),
+                                            4 => hex::encode((num as u32).to_le_bytes()),
+                                            8 => hex::encode((num as u64).to_le_bytes()),
+                                            _ => hex::encode([num as u8]),
+                                        };
+                                        local_positions.push(chunk_start + offset);
+                                        local_values.push(hex_string);
+                                        found_count.fetch_add(1, Ordering::SeqCst);
+                                    }
                                 }
+                            }
+                            // Check if local_positions exceed MAX_RESULTS and insert into global_positions
+                            if local_positions.len() > MAX_RESULTS {
+                                let mut global_positions = GLOBAL_POSITIONS.write().unwrap();
+                                let combined: Vec<(usize, String)> = local_positions
+                                    .into_iter()
+                                    .zip(local_values.into_iter())
+                                    .collect();
+                                if let Some(positions) =
+                                    global_positions.get_mut(&scan_request.scan_id)
+                                {
+                                    positions.extend(combined);
+                                } else {
+                                    global_positions.insert(scan_request.scan_id.clone(), combined);
+                                }
+                                local_positions = vec![];
+                                local_values = vec![];
                             }
                         }
 
-                        local_positions
+                        let combined: Vec<(usize, String)> = local_positions
+                            .into_iter()
+                            .zip(local_values.into_iter())
+                            .collect();
+                        combined
                     })
                     .collect::<Vec<_>>()
             })
             .collect();
+
+        // println!("{}", found_count.load(Ordering::SeqCst));
 
         let flattened_results: Vec<(usize, String)> =
             thread_results.into_iter().flatten().collect();
@@ -351,7 +409,9 @@ pub async fn memory_scan_handler(
         if scan_request.return_as_json {
             let global_positions = GLOBAL_POSITIONS.read().unwrap();
             if let Some(positions) = global_positions.get(&scan_request.scan_id) {
-                let matched_addresses: Vec<serde_json::Value> = positions
+                let limited_positions = &positions[..std::cmp::min(MAX_RESULTS, positions.len())];
+                let is_rounded = limited_positions.len() != positions.len();
+                let matched_addresses: Vec<serde_json::Value> = limited_positions
                     .clone()
                     .into_iter()
                     .map(|(address, value)| {
@@ -361,10 +421,11 @@ pub async fn memory_scan_handler(
                         })
                     })
                     .collect();
-                let count = positions.len();
+                let count = found_count.load(Ordering::SeqCst);
                 let result = json!({
                     "matched_addresses": matched_addresses,
-                    "found":count
+                    "found":count,
+                    "is_rounded":is_rounded
                 });
                 let result_string = result.to_string();
                 let response = Response::builder()
@@ -382,7 +443,7 @@ pub async fn memory_scan_handler(
         } else {
             let global_positions = GLOBAL_POSITIONS.read().unwrap();
             if let Some(positions) = global_positions.get(&scan_request.scan_id) {
-                let count = positions.len();
+                let count = found_count.load(Ordering::SeqCst);
                 let result_string = json!({ "found": count }).to_string();
                 let response = Response::builder()
                     .header("Content-Type", "application/json")
@@ -660,6 +721,9 @@ pub async fn memory_filter_handler(
         global_positions.insert(filter_request.scan_id.clone(), new_positions.clone());
 
         if filter_request.return_as_json {
+            let limited_positions =
+                &new_positions[..std::cmp::min(MAX_RESULTS, new_positions.len())];
+            let is_rounded = limited_positions.len() != new_positions.len();
             let matched_addresses: Vec<serde_json::Value> = new_positions
                 .clone()
                 .iter()
@@ -673,7 +737,9 @@ pub async fn memory_filter_handler(
             let count = new_positions.len();
             let result = json!({
                 "matched_addresses": matched_addresses,
-                "found":count
+                "found":count,
+                "is_rounded":is_rounded
+
             });
             let result_string = result.to_string();
             let response = Response::builder()

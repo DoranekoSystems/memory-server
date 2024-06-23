@@ -38,6 +38,8 @@ export function Scanner({ currentPage }) {
     [BigInt(0), BigInt("0x7FFFFFFFFFFFFF")],
   ]);
   const [scanResults, setScanResults] = useState<any[]>([]);
+  const [scanResultsCount, setScanResultsCount] = useState(0);
+  const [isScanRounded, setIsScanRounded] = useState(false);
   const [scanValue, setScanValue] = useState("0");
   const [dataType, setDataType] = useState("int32");
   const [findType, setFindType] = useState("exact");
@@ -52,6 +54,7 @@ export function Scanner({ currentPage }) {
   const [selectedIndices, setSelectedIndices] = useState([]);
   const [selectedAddresses, setSelectedAddresses] = useState([]);
   const [patchValue, setPatchValue] = useState("");
+  const [scanAlign, setScanAlign] = useState(4);
   const tableRef = useRef(null);
 
   useEffect(() => {}, [loading, scanResults, ipAddress, dataType]);
@@ -117,12 +120,18 @@ export function Scanner({ currentPage }) {
     setScanResults([]);
     setSelectedIndices([]);
     setSelectedAddresses([]);
+    setIsScanRounded(false);
+    setScanResultsCount(0);
   };
 
   const handleFind = async () => {
     try {
       if (scanValue == "" && findType != "unknown") {
         return;
+      }
+      let align = scanAlign;
+      if (scanAlign == "") {
+        align = 1;
       }
       setIsFirstScan(false);
       setIsLoading(true);
@@ -149,6 +158,7 @@ export function Scanner({ currentPage }) {
         address_ranges: _addressRanges,
         find_type: findType,
         data_type: dataType,
+        align: align,
         scan_id: "Scan 1",
         return_as_json: true,
       });
@@ -156,6 +166,8 @@ export function Scanner({ currentPage }) {
       if (response.status === 200) {
         const scanResults = response.data.matched_addresses || [];
         setScanResults(scanResults);
+        setScanResultsCount(response.data.found);
+        setIsScanRounded(response.data.is_rounded);
         console.log(`Pattern found ${response.data.found} times`);
       } else {
         console.error(`Memory scan failed: ${response.status}`);
@@ -188,6 +200,8 @@ export function Scanner({ currentPage }) {
       if (response.status === 200) {
         const scanResults = response.data.matched_addresses || [];
         setScanResults(scanResults);
+        setScanResultsCount(response.data.found);
+        setIsScanRounded(response.data.is_rounded);
         console.log(`Pattern found ${response.data.found} times`);
       } else {
         console.error(`Memory filter failed: ${response.status}`);
@@ -411,13 +425,32 @@ export function Scanner({ currentPage }) {
                 Reset
               </Button>
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="filter-type">Alignment(Hex)</Label>
+              <Input
+                placeholder="1"
+                value={scanAlign.toString(16).toUpperCase()}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setScanAlign(value === "" ? "" : parseInt(value, 16) || "");
+                }}
+                disabled={!isFirstScan}
+              />
+            </div>
           </CardContent>
         </Card>
         <Card className="w-full max-w-4xl mb-6">
           <CardHeader>
             <CardTitle className="text-2xl">Scan Data List</CardTitle>
             <p className="mt-1 text-sm text-muted-foreground">
-              Showing {scanResults.length} results
+              {isScanRounded ? (
+                <>
+                  Results limited to 100,000 (Full set:{" "}
+                  {scanResultsCount.toLocaleString()})
+                </>
+              ) : (
+                <>Results: {scanResultsCount.toLocaleString()}</>
+              )}
             </p>
           </CardHeader>
           <CardContent className="overflow-y-auto max-h-[500px]">

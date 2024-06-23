@@ -32,6 +32,28 @@ export function MemoryView({ currentPage }) {
   const [cellPosition, setCellPosition] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
 
+  function intToString(value, dataType) {
+    const buffer = new ArrayBuffer(8);
+    const view = new DataView(buffer);
+
+    switch (dataType) {
+      case "int8":
+        view.setInt8(0, value);
+        return view.getInt8(0).toString();
+      case "int16":
+        view.setInt16(0, value, true);
+        return view.getInt16(0, true).toString();
+      case "int32":
+        view.setInt32(0, value, true);
+        return view.getInt32(0, true).toString();
+      case "int64":
+        view.setBigInt64(0, BigInt(value), true);
+        return view.getBigInt64(0, true).toString();
+      default:
+        return value.toString();
+    }
+  }
+
   const handleCloseRegion = (regionId) => {
     setRegions((prevRegions) =>
       prevRegions.filter((region) => region.id !== regionId)
@@ -195,21 +217,43 @@ export function MemoryView({ currentPage }) {
         const region = regions.find((r) => r.id === selectedCell.regionId);
 
         switch (region.dataType) {
-          case "byte":
+          case "int8":
             rowLength = 16;
             break;
-          case "word":
+          case "int16":
             rowLength = 8;
             adjust = 2;
             break;
-          case "dword":
+          case "int32":
             rowLength = 4;
             adjust = 4;
             break;
-          case "qword":
+          case "int64":
             rowLength = 2;
             adjust = 8;
             break;
+          case "uint8":
+            rowLength = 16;
+            break;
+          case "uint16":
+            rowLength = 8;
+            adjust = 2;
+            break;
+          case "uint32":
+            rowLength = 4;
+            adjust = 4;
+            break;
+          case "uint64":
+            rowLength = 2;
+            adjust = 8;
+            break;
+          case "float":
+            rowLength = 4;
+            adjust = 4;
+            break;
+          case "double":
+            rowLength = 2;
+            adjust = 8;
           default:
             rowLength = 16;
         }
@@ -310,7 +354,7 @@ export function MemoryView({ currentPage }) {
       memoryData: null,
       prevMemoryData: null,
       encoding: "utf-8",
-      dataType: "byte",
+      dataType: "uint8",
       displayType: "hex",
     };
     setRegions([...regions, newRegion]);
@@ -378,18 +422,35 @@ export function MemoryView({ currentPage }) {
 
     let adjust = 1;
     switch (region.dataType) {
-      case "byte":
+      case "int8":
         adjust = 1;
         break;
-      case "word":
+      case "int16":
         adjust = 2;
         break;
-      case "dword":
+      case "int32":
         adjust = 4;
         break;
-      case "qword":
+      case "int64":
         adjust = 8;
         break;
+      case "uint8":
+        adjust = 1;
+        break;
+      case "uint16":
+        adjust = 2;
+        break;
+      case "uint32":
+        adjust = 4;
+        break;
+      case "uint64":
+        adjust = 8;
+        break;
+      case "float":
+        adjust = 4;
+        break;
+      case "double":
+        adjust = 8;
       default:
     }
 
@@ -398,7 +459,8 @@ export function MemoryView({ currentPage }) {
       let hexBytesWidth;
 
       switch (region.dataType) {
-        case "byte":
+        case "int8":
+        case "uint8":
           hexBytes = Array.from(bytes.slice(i, i + length), (byte, index) => {
             const prevByte = prevBytes ? prevBytes[i + index] : null;
             const color =
@@ -421,6 +483,8 @@ export function MemoryView({ currentPage }) {
               >
                 {region.displayType === "hex"
                   ? byte.toString(16).padStart(2, "0").toUpperCase()
+                  : region.dataType == "int8"
+                  ? intToString(byte, "int8").padStart(4, " ")
                   : byte.toString(10).padStart(3, " ")}
               </span>
             );
@@ -434,7 +498,8 @@ export function MemoryView({ currentPage }) {
               ? "w-48"
               : "w-64";
           break;
-        case "word":
+        case "int16":
+        case "uint16":
           hexBytes = Array.from(
             new Uint16Array(bytes.slice(i, i + length).buffer),
             (word, index) => {
@@ -461,6 +526,8 @@ export function MemoryView({ currentPage }) {
                 >
                   {region.displayType === "hex"
                     ? word.toString(16).padStart(4, "0").toUpperCase()
+                    : region.dataType == "int16"
+                    ? intToString(word, "int16").padStart(6, " ")
                     : word.toString(10).padStart(5, " ")}
                 </span>
               );
@@ -472,10 +539,11 @@ export function MemoryView({ currentPage }) {
                 ? "w-96"
                 : "w-160"
               : region.displayType === "hex"
-              ? "w-40"
-              : "w-48";
+              ? "w-48"
+              : "w-54";
           break;
-        case "dword":
+        case "int32":
+        case "uint32":
           hexBytes = Array.from(
             new Uint32Array(bytes.slice(i, i + length).buffer),
             (dword, index) => {
@@ -502,6 +570,8 @@ export function MemoryView({ currentPage }) {
                 >
                   {region.displayType === "hex"
                     ? dword.toString(16).padStart(8, "0").toUpperCase()
+                    : region.dataType == "int32"
+                    ? intToString(dword, "int32").padStart(11, " ")
                     : dword.toString(10).padStart(10, " ")}
                 </span>
               );
@@ -516,7 +586,8 @@ export function MemoryView({ currentPage }) {
               ? "w-36"
               : "w-128";
           break;
-        case "qword":
+        case "int64":
+        case "uint64":
           hexBytes = Array.from(
             new BigUint64Array(bytes.slice(i, i + length).buffer),
             (qword, index) => {
@@ -545,6 +616,8 @@ export function MemoryView({ currentPage }) {
                 >
                   {region.displayType === "hex"
                     ? qword.toString(16).padStart(16, "0").toUpperCase()
+                    : region.dataType == "int64"
+                    ? intToString(qword, "int64").padStart(21, " ")
                     : qword.toString(10).padStart(20, " ")}
                 </span>
               );
@@ -558,6 +631,80 @@ export function MemoryView({ currentPage }) {
               : region.displayType === "hex"
               ? "w-36"
               : "w-48";
+          break;
+        case "float":
+          if (region.displayType !== "hex") {
+            hexBytes = Array.from(
+              new Float32Array(bytes.slice(i, i + length).buffer),
+              (float, index) => {
+                const prevFloat = prevBytes
+                  ? new Float32Array(prevBytes.slice(i, i + length).buffer)[
+                      index
+                    ]
+                  : null;
+                const color =
+                  prevFloat !== null && prevFloat !== float && !isAddressChanged
+                    ? "text-red-500"
+                    : "text-white";
+                const background =
+                  selectedCell.regionId === region.id &&
+                  selectedCell.index * adjust === i + index * adjust
+                    ? "bg-blue-500"
+                    : "";
+                return (
+                  <span
+                    key={index}
+                    className={`${color} ${background}`}
+                    onClick={() =>
+                      handleCellClick(region.id, Math.floor(i / adjust) + index)
+                    }
+                    style={{ marginRight: "20px" }}
+                  >
+                    {float.toFixed(8).padStart(11, " ")}
+                  </span>
+                );
+              }
+            );
+            hexBytesWidth = window.innerWidth >= 640 ? "w-104" : "w-128";
+          }
+          break;
+        case "double":
+          if (region.displayType !== "hex") {
+            hexBytes = Array.from(
+              new Float64Array(bytes.slice(i, i + length).buffer),
+              (double, index) => {
+                const prevDouble = prevBytes
+                  ? new Float64Array(prevBytes.slice(i, i + length).buffer)[
+                      index
+                    ]
+                  : null;
+                const color =
+                  prevDouble !== null &&
+                  prevDouble !== double &&
+                  !isAddressChanged
+                    ? "text-red-500"
+                    : "text-white";
+                const background =
+                  selectedCell.regionId === region.id &&
+                  selectedCell.index * adjust === i + index * adjust
+                    ? "bg-blue-500"
+                    : "";
+                return (
+                  <span
+                    key={index}
+                    className={`${color} ${background}`}
+                    onClick={() =>
+                      handleCellClick(region.id, Math.floor(i / adjust) + index)
+                    }
+                    style={{ marginRight: "20px" }}
+                  >
+                    {double.toFixed(16).padStart(20, " ")}
+                  </span>
+                );
+              }
+            );
+            hexBytesWidth = window.innerWidth >= 640 ? "w-96" : "w-128";
+          }
           break;
         default:
           hexBytes = Array.from(bytes.slice(i, i + length), (byte, index) => {
@@ -632,7 +779,7 @@ export function MemoryView({ currentPage }) {
                 : "text-white";
             const background =
               selectedCell.regionId === region.id &&
-              (region.dataType === "byte"
+              (region.dataType === "uint8" || region.dataType === "int8"
                 ? Math.floor(selectedCell.index / 2) ===
                   Math.floor((i + index * 2) / 2)
                 : Math.floor((selectedCell.index / adjust) * adjust) ===
@@ -690,16 +837,16 @@ export function MemoryView({ currentPage }) {
     const region = getSelectedRegion();
     let adjust = 0;
     switch (region.dataType) {
-      case "byte":
+      case "uint8":
         adjust = 1;
         break;
-      case "word":
+      case "uint16":
         adjust = 2;
         break;
-      case "dword":
+      case "uint32":
         adjust = 4;
         break;
-      case "qword":
+      case "uint64":
         adjust = 8;
         break;
       default:
@@ -854,12 +1001,27 @@ export function MemoryView({ currentPage }) {
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Select" />
               </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="byte">BYTE</SelectItem>
-                <SelectItem value="word">WORD</SelectItem>
-                <SelectItem value="dword">DWORD</SelectItem>
-                <SelectItem value="qword">QWORD</SelectItem>
-              </SelectContent>
+              {getSelectedRegion()?.displayType === "hex" ? (
+                <SelectContent>
+                  <SelectItem value="uint8">BYTE</SelectItem>
+                  <SelectItem value="uint16">WORD</SelectItem>
+                  <SelectItem value="uint32">DWORD</SelectItem>
+                  <SelectItem value="uint64">QWORD</SelectItem>
+                </SelectContent>
+              ) : (
+                <SelectContent>
+                  <SelectItem value="int8">Int8</SelectItem>
+                  <SelectItem value="int16">Int16</SelectItem>
+                  <SelectItem value="int32">Int32</SelectItem>
+                  <SelectItem value="int64">Int64</SelectItem>
+                  <SelectItem value="uint8">UInt8</SelectItem>
+                  <SelectItem value="uint16">UInt16</SelectItem>
+                  <SelectItem value="uint32">UInt32</SelectItem>
+                  <SelectItem value="uint64">UInt64</SelectItem>
+                  <SelectItem value="float">Float</SelectItem>
+                  <SelectItem value="double">Double</SelectItem>
+                </SelectContent>
+              )}
             </Select>
           </div>
         </aside>

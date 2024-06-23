@@ -43,6 +43,7 @@ fn main() {
 
         let handle = runtime.block_on(async {
             println!("memory_server has started listening on port 3030.");
+            println!("Startup by embedded mode!");
             let pid_state = Arc::new(Mutex::new(None));
 
             let cors = warp::cors()

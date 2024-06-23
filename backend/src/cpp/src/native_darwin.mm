@@ -78,8 +78,9 @@ extern "C" ssize_t write_memory_native(int pid, mach_vm_address_t address,
   vm_region_basic_info_data_64_t info;
   mach_msg_type_number_t info_count = VM_REGION_BASIC_INFO_COUNT_64;
   mach_port_t object_name;
+  bool is_embeded_mode = pid == getpid();
 
-  if (pid == getpid()) {
+  if (is_embeded_mode) {
     task = mach_task_self();
   } else {
     err = task_for_pid(mach_task_self(), pid, &task);
@@ -90,7 +91,9 @@ extern "C" ssize_t write_memory_native(int pid, mach_vm_address_t address,
     }
   }
 
-  task_suspend(task);
+  if (!is_embeded_mode) {
+    task_suspend(task);
+  }
 
   mach_vm_address_t region_address = address;
   mach_vm_size_t region_size = size;
@@ -102,7 +105,9 @@ extern "C" ssize_t write_memory_native(int pid, mach_vm_address_t address,
     debug_log("Error: mach_vm_region failed with error %d (%s) at address "
               "0x%llx, size 0x%llx\n",
               err, mach_error_string(err), address, size);
-    task_resume(task);
+    if (!is_embeded_mode) {
+      task_resume(task);
+    }
     return -1;
   }
   original_protection = info.protection;
@@ -114,7 +119,9 @@ extern "C" ssize_t write_memory_native(int pid, mach_vm_address_t address,
     debug_log(
         "Error: mach_vm_protect (write enable) failed with error %d (%s)\n",
         err, mach_error_string(err));
-    task_resume(task);
+    if (is_embeded_mode) {
+      task_resume(task);
+    }
     return -1;
   }
 
@@ -126,7 +133,9 @@ extern "C" ssize_t write_memory_native(int pid, mach_vm_address_t address,
               err, mach_error_string(err), address, size);
     mach_vm_protect(task, address, size, false,
                     original_protection); // Attempt to restore protection
-    task_resume(task);
+    if (!is_embeded_mode) {
+      task_resume(task);
+    }
     return -1;
   }
 
@@ -136,11 +145,15 @@ extern "C" ssize_t write_memory_native(int pid, mach_vm_address_t address,
     debug_log("Warning: mach_vm_protect (restore protection) failed with error "
               "%d (%s)\n",
               err, mach_error_string(err));
-    task_resume(task);
+    if (!is_embeded_mode) {
+      task_resume(task);
+    }
     return -1;
   }
 
-  task_resume(task);
+  if (!is_embeded_mode) {
+    task_resume(task);
+  }
   return size;
 }
 

@@ -1,5 +1,6 @@
 use ctor::ctor;
 use include_dir::{include_dir, Dir};
+use std::env;
 use std::io::{stdout, Write};
 use std::sync::{Arc, Mutex};
 use warp::http::Response;
@@ -7,10 +8,16 @@ use warp::http::Uri;
 use warp::path::Tail;
 use warp::Filter;
 
+mod allocator;
 mod api;
 mod util;
 
 static STATIC_DIR: Dir = include_dir!("../frontend/out");
+
+#[ctor]
+fn init() {
+    env::set_var("RUST_BACKTRACE", "full");
+}
 
 async fn serve_static(path: String) -> Result<impl warp::Reply, warp::Rejection> {
     // Adjustment for include_dir! in windows environment

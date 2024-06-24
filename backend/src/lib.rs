@@ -7,6 +7,8 @@ use tokio::runtime::Builder;
 use warp::http::Response;
 use warp::path::Tail;
 use warp::Filter;
+
+mod allocator;
 mod api;
 mod util;
 use std::thread;

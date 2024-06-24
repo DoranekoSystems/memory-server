@@ -1,3 +1,4 @@
+use crate::allocator;
 use crate::api::lz4::EncoderBuilder;
 use crate::util;
 use crate::util::binary_search;
@@ -277,7 +278,7 @@ pub async fn memory_scan_handler(
             .flat_map(|(start_address, end_address)| {
                 let found_count = Arc::clone(&found_count);
                 let size = end_address - start_address;
-                let chunk_size = 1024 * 1024 * 32; // 32MB
+                let chunk_size = 1024 * 1024 * 16; // 16MB
                 let num_chunks = (size + chunk_size - 1) / chunk_size;
 
                 (0..num_chunks)

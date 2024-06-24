@@ -644,7 +644,7 @@ pub async fn memory_filter_handler(
                 }
             });
             if found_count.load(Ordering::SeqCst) < 1_000_000 {
-                let results: Vec<_> = memory
+                let mut results: Vec<_> = memory
                     .par_iter()
                     .flat_map(
                         |(
@@ -683,6 +683,7 @@ pub async fn memory_filter_handler(
                     )
                     .collect();
 
+                results.sort_by_key(|k| k.0);
                 new_positions = results;
                 global_memory.remove(&filter_request.scan_id);
             }
@@ -926,7 +927,7 @@ pub async fn memory_filter_handler(
             } else {
                 is_rounded = limited_positions.len() != new_positions.len();
             }
-            let matched_addresses: Vec<serde_json::Value> = new_positions
+            let matched_addresses: Vec<serde_json::Value> = limited_positions
                 .clone()
                 .iter()
                 .map(|(address, value)| {

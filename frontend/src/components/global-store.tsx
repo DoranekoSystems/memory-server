@@ -7,6 +7,10 @@ interface globalState {
   setOpenProcessId: (openProcessId: Number) => void;
   openProcessName: string;
   setOpenProcessName: (openProcessName: string) => void;
+  serverMode: string;
+  setServerMode: (serverMode: string) => void;
+  targetOS: string;
+  setTargetOS: (targetOS: string) => void;
 }
 
 export const useStore = create<globalState>((set) => ({
@@ -16,4 +20,8 @@ export const useStore = create<globalState>((set) => ({
   setOpenProcessId: (id: Number) => set({ openProcessId: id }),
   openProcessName: "",
   setOpenProcessName: (name: string) => set({ openProcessName: name }),
+  serverMode: "",
+  setServerMode: (mode: string) => set({ serverMode: mode }),
+  targetOS: "",
+  setTargetOS: (name: string) => set({ targetOS: name }),
 }));

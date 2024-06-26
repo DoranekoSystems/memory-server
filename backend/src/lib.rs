@@ -1,5 +1,6 @@
 use ctor::ctor;
 use include_dir::{include_dir, Dir};
+use std::env;
 use std::future::Future;
 use std::io::{stdout, Write};
 use std::sync::{Arc, Mutex};
@@ -45,7 +46,7 @@ fn main() {
 
         let handle = runtime.block_on(async {
             println!("memory_server has started listening on port 3030.");
-            println!("Startup by embedded mode!");
+            std::env::set_var("MEMORY_SERVER_RUNNING_MODE", "embedded");
             let pid_state = Arc::new(Mutex::new(None));
 
             let cors = warp::cors()
@@ -115,6 +116,11 @@ fn main() {
                 .and_then(
                     |pid_state| async move { api::enumerate_regions_handler(pid_state).await },
                 );
+
+            let server_info = warp::path!("serverinfo")
+                .and(warp::get())
+                .and_then(api::server_info_handler);
+
             let routes = open_process
                 .or(read_memory)
                 .or(read_memory_multiple)
@@ -123,6 +129,7 @@ fn main() {
                 .or(memory_filter)
                 .or(enumregions)
                 .or(enumprocess)
+                .or(server_info)
                 .or(static_files)
                 .with(cors);
             warp::serve(routes).run(([0, 0, 0, 0], 3030)).await;

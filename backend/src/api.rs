@@ -17,10 +17,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::collections::VecDeque;
+use std::env;
 use std::ffi::CString;
 use std::fs::File;
 use std::io::Error;
 use std::io::{BufRead, BufReader};
+use std::process;
 use std::str;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::RwLock;
@@ -73,6 +75,44 @@ pub fn with_state(
 }
 
 const MAX_RESULTS: usize = 100_000;
+
+#[derive(Serialize)]
+struct ServerInfo {
+    git_hash: String,
+    target_os: String,
+    arch: String,
+    pid: u32,
+    mode: String,
+}
+
+pub async fn server_info_handler() -> Result<impl warp::Reply, warp::Rejection> {
+    let git_hash = env!("GIT_HASH");
+    let target_os = env!("TARGET_OS");
+
+    let arch = if cfg!(target_arch = "x86_64") {
+        "x86_64"
+    } else if cfg!(target_arch = "aarch64") {
+        "aarch64"
+    } else if cfg!(target_arch = "arm") {
+        "arm"
+    } else if cfg!(target_arch = "x86") {
+        "x86"
+    } else {
+        "unknown"
+    };
+
+    let pid = process::id();
+
+    let server_info = ServerInfo {
+        git_hash: git_hash.to_string(),
+        target_os: target_os.to_string(),
+        arch: arch.to_string(),
+        pid: pid,
+        mode: std::env::var("MEMORY_SERVER_RUNNING_MODE").unwrap_or_else(|_| "unknown".to_string()),
+    };
+
+    Ok(warp::reply::json(&server_info))
+}
 
 #[derive(Deserialize)]
 pub struct OpenProcess {

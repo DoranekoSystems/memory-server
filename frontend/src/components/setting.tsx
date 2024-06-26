@@ -19,7 +19,15 @@ import { Bold } from "lucide-react";
 import { useStore } from "./global-store";
 export function Setting() {
   const [openedProcess, setOpenedProcess] = useState(null);
+  const [connectedServer, setConnectedServer] = useState(false);
   const ipAddress = useStore((state) => state.ipAddress);
+  const [serverGitHash, setServerGitHash] = useState("");
+  const [serverArch, setServerArch] = useState("");
+  const [serverPid, setServerPid] = useState(0);
+  const serverMode = useStore((state) => state.serverMode);
+  const setServerMode = useStore((state) => state.setServerMode);
+  const targetOS = useStore((state) => state.targetOS);
+  const setTargetOS = useStore((state) => state.setTargetOS);
   const setIpAddress = useStore((state) => state.setIpAddress);
 
   const [processes, setProcesses] = useState([]);
@@ -29,6 +37,30 @@ export function Setting() {
 
   const handleSelectProcess = (process) => {
     setSelectedProcess(process);
+  };
+
+  const setup = async () => {
+    await getServerInfo();
+    await fetchProcesses();
+  };
+
+  const getServerInfo = async () => {
+    if (inputRef.current == null) {
+      return null;
+    }
+    const ip = inputRef.current.value;
+    const base_url = `http://${ip}:3030`;
+    const serverinfo_url = `${base_url}/serverinfo`;
+    const response = await fetch(serverinfo_url);
+    if (response.status == 200) {
+      const data = await response.json();
+      setServerMode(data.mode);
+      setTargetOS(data.target_os);
+      setServerArch(data.arch);
+      setServerPid(data.pid);
+      setServerGitHash(data.git_hash);
+    } else {
+    }
   };
 
   const fetchProcesses = async () => {
@@ -105,7 +137,7 @@ export function Setting() {
             </div>
           </CardContent>
           <CardFooter>
-            <Button className="w-full" onClick={fetchProcesses}>
+            <Button className="w-full" onClick={setup}>
               Connect
             </Button>
           </CardFooter>
@@ -146,18 +178,43 @@ export function Setting() {
           </CardFooter>
         </Card>
         {openedProcess && (
-          <Card className="w-full max-w-md">
+          <Card className="w-full max-w-md mb-6">
             <CardHeader>
               <CardTitle className="text-2xl">Process Info</CardTitle>
             </CardHeader>
             <CardContent>
-              <div>
+              <div className="mb-1">
                 <Label>Process ID:</Label>
                 <p>{openedProcess.pid}</p>
               </div>
               <div>
                 <Label>Process Name:</Label>
                 <p>{openedProcess.processname}</p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+        {serverPid > 0 && (
+          <Card className="w-full max-w-md">
+            <CardHeader>
+              <CardTitle className="text-2xl">Server Info</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="mb-1">
+                <Label>Target OS:</Label>
+                <p>{targetOS}</p>
+              </div>
+              <div className="mb-1">
+                <Label>Mode:</Label>
+                <p>{serverMode}</p>
+              </div>
+              <div className="mb-1">
+                <Label>Pid:</Label>
+                <p>{serverPid}</p>
+              </div>
+              <div className="mb-1">
+                <Label>Git Hash:</Label>
+                <p>{serverGitHash}</p>
               </div>
             </CardContent>
           </Card>

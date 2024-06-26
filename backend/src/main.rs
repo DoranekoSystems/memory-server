@@ -45,6 +45,7 @@ async fn serve_static(path: String) -> Result<impl warp::Reply, warp::Rejection>
 #[tokio::main]
 async fn main() {
     println!("memory_server has started listening on port 3030.");
+    std::env::set_var("MEMORY_SERVER_RUNNING_MODE", "normal");
 
     let cors = warp::cors()
         .allow_any_origin()
@@ -113,6 +114,11 @@ async fn main() {
         .and(warp::get())
         .and(api::with_state(pid_state.clone()))
         .and_then(|pid_state| async move { api::enumerate_regions_handler(pid_state).await });
+
+    let server_info = warp::path!("serverinfo")
+        .and(warp::get())
+        .and_then(api::server_info_handler);
+
     let routes = open_process
         .or(read_memory)
         .or(read_memory_multiple)
@@ -121,6 +127,7 @@ async fn main() {
         .or(memory_filter)
         .or(enumregions)
         .or(enumprocess)
+        .or(server_info)
         .or(static_files)
         .with(cors);
 

@@ -1,10 +1,25 @@
 extern crate cc;
+use std::process::Command;
+
+fn get_git_hash() -> String {
+    let output = Command::new("git").args(&["rev-parse", "HEAD"]).output();
+
+    match output {
+        Ok(output) if output.status.success() => {
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
+        }
+        _ => "unknown".to_string(),
+    }
+}
 
 fn main() {
     println!("cargo:rustc-link-search=native=/usr/local/lib");
+    let git_hash = get_git_hash();
+    println!("cargo:rustc-env=GIT_HASH={}", git_hash);
 
     let mut build = cc::Build::new();
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
+    println!("cargo:rustc-env=TARGET_OS={}", target_os);
 
     if cfg!(windows) {
         println!("cargo:rustc-cfg=host_os=\"windows\"");

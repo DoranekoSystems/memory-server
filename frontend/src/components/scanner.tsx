@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { TriStateCheckbox } from "@/components/ui/checkbox";
+import { TriStateCheckbox, NormalCheckbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -13,7 +13,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table,
   TableBody,
@@ -50,11 +49,14 @@ export function Scanner({ currentPage }) {
   const [isFinding, setIsFinding] = useState(false);
   const [isFiltering, setIsFiltering] = useState(false);
   const ipAddress = useStore((state) => state.ipAddress);
+  const serverMode = useStore((state) => state.serverMode);
+  const targetOS = useStore((state) => state.targetOS);
   const [loading, setLoading] = useState(true);
   const [selectedIndices, setSelectedIndices] = useState([]);
   const [selectedAddresses, setSelectedAddresses] = useState([]);
   const [patchValue, setPatchValue] = useState("");
   const [scanAlign, setScanAlign] = useState(4);
+  const [doSuspend, setDoSuspend] = useState(false);
   const tableRef = useRef(null);
 
   useEffect(() => {}, [loading, scanResults, ipAddress, dataType]);
@@ -161,6 +163,7 @@ export function Scanner({ currentPage }) {
         align: align,
         scan_id: "Scan 1",
         return_as_json: true,
+        do_suspend: doSuspend,
       });
 
       if (response.status === 200) {
@@ -195,6 +198,7 @@ export function Scanner({ currentPage }) {
           scan_id: "Scan 1",
           filter_method: filterType,
           return_as_json: true,
+          do_suspend: doSuspend,
         }
       );
       if (response.status === 200) {
@@ -442,6 +446,20 @@ export function Scanner({ currentPage }) {
                 disabled={!isFirstScan}
               />
             </div>
+            {targetOS == "ios" && (
+              <NormalCheckbox
+                id="suspend"
+                label="Suspend the process during scanning"
+                defaultState={0}
+                onStateChange={(state) => {
+                  if (state === 0) {
+                    setDoSuspend(false);
+                  } else {
+                    setDoSuspend(true);
+                  }
+                }}
+              ></NormalCheckbox>
+            )}
           </CardContent>
         </Card>
         <Card className="w-full max-w-4xl mb-6">

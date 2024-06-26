@@ -51,6 +51,8 @@ extern "C" {
         size: libc::size_t,
         buffer: *const u8,
     ) -> libc::ssize_t;
+    fn suspend_process(pid: i32) -> bool;
+    fn resume_process(pid: i32) -> bool;
 }
 
 #[repr(C)]
@@ -281,6 +283,7 @@ pub struct MemoryScanRequest {
     scan_id: String,
     align: usize,
     return_as_json: bool,
+    do_suspend: bool,
 }
 
 pub async fn memory_scan_handler(
@@ -289,7 +292,14 @@ pub async fn memory_scan_handler(
 ) -> Result<impl warp::Reply, warp::Rejection> {
     let pid = pid_state.lock().unwrap();
 
+    let mut is_suspend_success: bool = false;
+    let do_suspend = scan_request.do_suspend;
     if let Some(pid) = *pid {
+        if do_suspend {
+            unsafe {
+                is_suspend_success = suspend_process(pid);
+            }
+        }
         // Clear global_positions for the given scan_id
         {
             let mut global_positions = GLOBAL_POSITIONS.write().unwrap();
@@ -447,6 +457,11 @@ pub async fn memory_scan_handler(
             })
             .collect();
 
+        if do_suspend && is_suspend_success {
+            unsafe {
+                resume_process(pid);
+            }
+        }
         // println!("{}", found_count.load(Ordering::SeqCst));
 
         let flattened_results: Vec<(usize, String)> =
@@ -549,6 +564,7 @@ pub struct MemoryFilterRequest {
     scan_id: String,
     filter_method: String,
     return_as_json: bool,
+    do_suspend: bool,
 }
 
 pub async fn memory_filter_handler(
@@ -557,6 +573,8 @@ pub async fn memory_filter_handler(
 ) -> Result<impl warp::Reply, warp::Rejection> {
     let pid = pid_state.lock().unwrap();
 
+    let mut is_suspend_success: bool = false;
+    let do_suspend = filter_request.do_suspend;
     if let Some(pid) = *pid {
         let mut new_positions = Vec::new();
         let mut global_positions = GLOBAL_POSITIONS.write().unwrap();
@@ -575,6 +593,11 @@ pub async fn memory_filter_handler(
         };
         // unknown search
         if let Some(memory) = global_memory.get_mut(&filter_request.scan_id) {
+            if do_suspend {
+                unsafe {
+                    is_suspend_success = suspend_process(pid);
+                }
+            }
             let scan_align = scan_option.align;
             memory.par_iter_mut().for_each(|entry| {
                 let (
@@ -729,6 +752,11 @@ pub async fn memory_filter_handler(
                 global_memory.remove(&filter_request.scan_id);
             }
         } else if let Some(positions) = global_positions.get(&filter_request.scan_id) {
+            if do_suspend {
+                unsafe {
+                    is_suspend_success = suspend_process(pid);
+                }
+            }
             let results: Result<Vec<_>, _> = positions
                 .par_iter()
                 .map(|(address, value)| {
@@ -942,7 +970,14 @@ pub async fn memory_filter_handler(
                 Ok(results) => {
                     new_positions = results.into_iter().filter_map(|x| x).collect();
                 }
-                Err(response) => return Ok(response),
+                Err(response) => {
+                    if do_suspend && is_suspend_success {
+                        unsafe {
+                            resume_process(pid);
+                        }
+                    }
+                    return Ok(response);
+                }
             }
         } else {
             let response = Response::builder()
@@ -951,7 +986,11 @@ pub async fn memory_filter_handler(
                 .unwrap();
             return Ok(response);
         }
-
+        if do_suspend && is_suspend_success {
+            unsafe {
+                resume_process(pid);
+            }
+        }
         global_positions.insert(filter_request.scan_id.clone(), new_positions.clone());
 
         if filter_request.return_as_json {

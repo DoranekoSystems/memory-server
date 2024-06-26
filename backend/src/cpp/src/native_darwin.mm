@@ -269,3 +269,49 @@ extern "C" ProcessInfo *enumprocess_native(size_t *count) {
     }
   }
 }
+
+extern "C" bool suspend_process(pid_t pid) {
+  task_t task;
+  kern_return_t err;
+  bool is_embeded_mode = pid == getpid();
+  if (is_embeded_mode) {
+    return false;
+  }
+  err = task_for_pid(mach_task_self(), pid, &task);
+  if (err != KERN_SUCCESS) {
+    debug_log("Error: task_for_pid failed with error %d (%s)\n", err,
+              mach_error_string(err));
+    return false;
+  }
+  err = task_suspend(task);
+  if (err != KERN_SUCCESS) {
+    debug_log("Error: task_suspend failed with error %d (%s)\n", err,
+              mach_error_string(err));
+    return false;
+  }
+
+  return true;
+}
+
+extern "C" bool resume_process(pid_t pid) {
+  task_t task;
+  kern_return_t err;
+  bool is_embeded_mode = pid == getpid();
+  if (is_embeded_mode) {
+    return false;
+  }
+  err = task_for_pid(mach_task_self(), pid, &task);
+  if (err != KERN_SUCCESS) {
+    debug_log("Error: task_for_pid failed with error %d (%s)\n", err,
+              mach_error_string(err));
+    return false;
+  }
+  err = task_resume(task);
+  if (err != KERN_SUCCESS) {
+    debug_log("Error: task_resume failed with error %d (%s)\n", err,
+              mach_error_string(err));
+    return false;
+  }
+
+  return true;
+}

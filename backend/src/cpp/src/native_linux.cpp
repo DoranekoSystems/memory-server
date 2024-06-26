@@ -7,15 +7,14 @@
 #include <iostream>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/mman.h>
 #include <sys/ptrace.h>
 #include <sys/queue.h>
 #include <sys/uio.h>
 #include <sys/wait.h>
-#include <sys/mman.h>
 #include <unistd.h>
 
-typedef struct
-{
+typedef struct {
   int pid;
   char *processname;
 } ProcessInfo;
@@ -24,10 +23,9 @@ typedef struct
 typedef ssize_t (*process_vm_readv_func)(pid_t, const struct iovec *,
                                          unsigned long, const struct iovec *,
                                          unsigned long, unsigned long);
-typedef ssize_t (*process_vm_writev_func)(pid_t,
-                                          const struct iovec *, unsigned long,
-                                          const struct iovec *, unsigned long,
-                                          unsigned long);
+typedef ssize_t (*process_vm_writev_func)(pid_t, const struct iovec *,
+                                          unsigned long, const struct iovec *,
+                                          unsigned long, unsigned long);
 static process_vm_readv_func PROCESS_VM_READV = nullptr;
 static process_vm_writev_func PROCESS_VM_WRITEV = nullptr;
 
@@ -36,20 +34,16 @@ static process_vm_writev_func PROCESS_VM_WRITEV = nullptr;
 extern "C" pid_t get_pid_native() { return getpid(); }
 
 extern "C" ssize_t read_memory_native(int pid, uintptr_t address, size_t size,
-                                      unsigned char *buffer)
-{
+                                      unsigned char *buffer) {
 #ifdef TARGET_IS_ANDROID
-  if (!PROCESS_VM_READV)
-  {
+  if (!PROCESS_VM_READV) {
     void *handle = dlopen("libc.so", RTLD_NOW);
-    if (!handle)
-    {
+    if (!handle) {
       return -1;
     }
 
     PROCESS_VM_READV = (process_vm_readv_func)dlsym(handle, "process_vm_readv");
-    if (!PROCESS_VM_READV)
-    {
+    if (!PROCESS_VM_READV) {
       dlclose(handle);
       return -1;
     }
@@ -76,28 +70,25 @@ extern "C" ssize_t read_memory_native(int pid, uintptr_t address, size_t size,
   ssize_t nread = process_vm_readv(pid, &local_iov, 1, &remote_iov, 1, 0);
 #endif
 
-  if (nread < 0)
-  {
+  if (nread < 0) {
     return -errno;
   }
 
   return nread;
 }
 
-extern "C" ssize_t write_memory_native(int pid, void *address, size_t size, unsigned char *buffer)
-{
-  if (pid == get_pid_native())
-  {
+extern "C" ssize_t write_memory_native(int pid, void *address, size_t size,
+                                       unsigned char *buffer) {
+  if (pid == get_pid_native()) {
 #ifdef TARGET_IS_ANDROID
-    if (!PROCESS_VM_WRITEV)
-    {
+    if (!PROCESS_VM_WRITEV) {
       void *handle = dlopen("libc.so", RTLD_NOW);
-      if (!handle)
-      {
+      if (!handle) {
         return -1;
       }
 
-      PROCESS_VM_WRITEV = (process_vm_writev_func)dlsym(handle, "process_vm_writev");
+      PROCESS_VM_WRITEV =
+          (process_vm_writev_func)dlsym(handle, "process_vm_writev");
     }
 #endif
     // Writing to own process
@@ -108,11 +99,11 @@ extern "C" ssize_t write_memory_native(int pid, void *address, size_t size, unsi
     uintptr_t page_start = start & ~(page_size - 1);
     uintptr_t page_end = (end + page_size - 1) & ~(page_size - 1);
     size_t protected_size = page_end - page_start;
-  
+
     // Change memory protection attributes
-    int result = mprotect(reinterpret_cast<void *>(page_start), protected_size, PROT_READ | PROT_WRITE | PROT_EXEC);
-    if (result != 0)
-    {
+    int result = mprotect(reinterpret_cast<void *>(page_start), protected_size,
+                          PROT_READ | PROT_WRITE | PROT_EXEC);
+    if (result != 0) {
       perror("mprotect");
       return -1;
     }
@@ -132,38 +123,32 @@ extern "C" ssize_t write_memory_native(int pid, void *address, size_t size, unsi
 #else
     ssize_t written = process_vm_writev(pid, &local_iov, 1, &remote_iov, 1, 0);
 #endif
-    if (written == -1)
-    {
+    if (written == -1) {
       perror("process_vm_writev");
-      // mprotect(reinterpret_cast<void *>(page_start), protected_size, PROT_READ | PROT_EXEC);
+      // mprotect(reinterpret_cast<void *>(page_start), protected_size,
+      // PROT_READ | PROT_EXEC);
       return -1;
     }
 
     // Restore memory protection attributes
-    /* result = mprotect(reinterpret_cast<void *>(page_start), protected_size, PROT_READ | PROT_EXEC);
-    if (result != 0) {
-        perror("mprotect");
-        return -1;
+    /* result = mprotect(reinterpret_cast<void *>(page_start), protected_size,
+    PROT_READ | PROT_EXEC); if (result != 0) { perror("mprotect"); return -1;
     } */
 
     return written;
-  }
-  else
-  {
+  } else {
     // Writing to another process
     // Attach to the process
     ptrace(PTRACE_ATTACH, pid, NULL, NULL);
     waitpid(pid, NULL, 0);
 
     // Write to the process's memory
-    for (int i = 0; i < size; i += sizeof(long))
-    {
-      if (size - i < sizeof(long))
-      {
+    for (int i = 0; i < size; i += sizeof(long)) {
+      if (size - i < sizeof(long)) {
         // Read the original memory
-        long orig = ptrace(PTRACE_PEEKDATA, pid, reinterpret_cast<char *>(address) + i, NULL);
-        if (errno != 0)
-        {
+        long orig = ptrace(PTRACE_PEEKDATA, pid,
+                           reinterpret_cast<char *>(address) + i, NULL);
+        if (errno != 0) {
           perror("ptrace");
           ptrace(PTRACE_DETACH, pid, NULL, NULL);
           return -1;
@@ -173,21 +158,19 @@ extern "C" ssize_t write_memory_native(int pid, void *address, size_t size, unsi
         std::memcpy(&orig, reinterpret_cast<char *>(buffer) + i, size - i);
 
         // Write the data to the process's memory
-        ptrace(PTRACE_POKEDATA, pid, reinterpret_cast<char *>(address) + i, orig);
-        if (errno != 0)
-        {
+        ptrace(PTRACE_POKEDATA, pid, reinterpret_cast<char *>(address) + i,
+               orig);
+        if (errno != 0) {
           perror("ptrace");
           ptrace(PTRACE_DETACH, pid, NULL, NULL);
           return -1;
         }
-      }
-      else
-      {
+      } else {
         long data;
         std::memcpy(&data, reinterpret_cast<char *>(buffer) + i, sizeof(long));
-        ptrace(PTRACE_POKEDATA, pid, reinterpret_cast<char *>(address) + i, data);
-        if (errno != 0)
-        {
+        ptrace(PTRACE_POKEDATA, pid, reinterpret_cast<char *>(address) + i,
+               data);
+        if (errno != 0) {
           perror("ptrace");
           ptrace(PTRACE_DETACH, pid, NULL, NULL);
           return -1;
@@ -196,8 +179,7 @@ extern "C" ssize_t write_memory_native(int pid, void *address, size_t size, unsi
     }
     // Detach from the process
     ptrace(PTRACE_DETACH, pid, NULL, NULL);
-    if (errno != 0)
-    {
+    if (errno != 0) {
       perror("ptrace");
       return -1;
     }
@@ -206,14 +188,12 @@ extern "C" ssize_t write_memory_native(int pid, void *address, size_t size, unsi
 }
 
 extern "C" void enumerate_regions_to_buffer(pid_t pid, char *buffer,
-                                            size_t buffer_size)
-{
+                                            size_t buffer_size) {
   char maps_file_path[64];
   snprintf(maps_file_path, sizeof(maps_file_path), "/proc/%d/maps", pid);
 
   std::ifstream maps_file(maps_file_path);
-  if (!maps_file.is_open())
-  {
+  if (!maps_file.is_open()) {
     snprintf(buffer, buffer_size, "Failed to open file: %s", maps_file_path);
     return;
   }
@@ -221,8 +201,7 @@ extern "C" void enumerate_regions_to_buffer(pid_t pid, char *buffer,
   size_t buffer_index = 0;
   std::string line;
   while (getline(maps_file, line) &&
-         (buffer_index + line.length() + 1) < buffer_size)
-  {
+         (buffer_index + line.length() + 1) < buffer_size) {
     size_t line_length = line.length();
     memcpy(buffer + buffer_index, line.c_str(), line_length);
     buffer_index += line_length;
@@ -233,11 +212,9 @@ extern "C" void enumerate_regions_to_buffer(pid_t pid, char *buffer,
   buffer[buffer_index] = '\0';
 }
 
-extern "C" ProcessInfo *enumprocess_native(size_t *count)
-{
+extern "C" ProcessInfo *enumprocess_native(size_t *count) {
   DIR *proc_dir = opendir("/proc");
-  if (!proc_dir)
-  {
+  if (!proc_dir) {
     return nullptr;
   }
 
@@ -245,17 +222,14 @@ extern "C" ProcessInfo *enumprocess_native(size_t *count)
   *count = 0;
 
   struct dirent *entry;
-  while ((entry = readdir(proc_dir)) != nullptr)
-  {
+  while ((entry = readdir(proc_dir)) != nullptr) {
     int pid = atoi(entry->d_name);
-    if (pid > 0)
-    {
+    if (pid > 0) {
       char comm_path[256];
       snprintf(comm_path, sizeof(comm_path), "/proc/%d/comm", pid);
 
       std::ifstream comm_file(comm_path);
-      if (comm_file.is_open())
-      {
+      if (comm_file.is_open()) {
         ProcessInfo process;
         process.pid = pid;
 
@@ -278,3 +252,6 @@ extern "C" ProcessInfo *enumprocess_native(size_t *count)
   closedir(proc_dir);
   return processes;
 }
+
+extern "C" bool suspend_process(pid_t pid) { return false; }
+extern "C" bool resume_process(pid_t pid) { return false; }

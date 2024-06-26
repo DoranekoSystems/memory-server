@@ -3,22 +3,27 @@ import { cn } from "@/lib/utils";
 import { useState, useEffect } from "react";
 import { Label } from "@/components/ui/label";
 
-const Checkbox = React.forwardRef<
-  HTMLInputElement,
-  React.InputHTMLAttributes<HTMLInputElement>
->(({ className, ...props }, ref) => (
-  <input
-    type="checkbox"
-    className={cn(
-      "rounded border-gray-300 text-blue-600 shadow-sm focus:ring-blue-500 dark:border-gray-700 dark:text-blue-600 dark:focus:ring-blue-600",
-      className
-    )}
-    ref={ref}
-    {...props}
-  />
-));
+const NormalCheckbox = ({ id, label, defaultState, onStateChange }) => {
+  const [state, setState] = useState(defaultState);
 
-Checkbox.displayName = "Checkbox";
+  const handleClick = () => {
+    const newState = state == 0 ? 1 : 0;
+    setState(newState);
+    onStateChange(newState);
+  };
+
+  return (
+    <div className="flex items-center space-x-2">
+      <div
+        className={`w-4 h-4 border border-gray-300 rounded-sm cursor-pointer ${
+          state === 1 ? "bg-blue-500" : ""
+        }`}
+        onClick={handleClick}
+      />
+      <Label htmlFor={id}>{label}</Label>
+    </div>
+  );
+};
 
 const TriStateCheckbox = ({ id, label, defaultState, onStateChange }) => {
   const [state, setState] = useState(defaultState);
@@ -41,4 +46,4 @@ const TriStateCheckbox = ({ id, label, defaultState, onStateChange }) => {
     </div>
   );
 };
-export { Checkbox, TriStateCheckbox };
+export { NormalCheckbox, TriStateCheckbox };

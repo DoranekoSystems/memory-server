@@ -142,41 +142,45 @@ export function Setting() {
             </Button>
           </CardFooter>
         </Card>
-        <Card className="w-full max-w-md mb-6">
-          <CardHeader>
-            <CardTitle className="text-2xl">Process List</CardTitle>
-            <CardDescription>
-              After selecting a process, please open the process.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <Input
-              placeholder="Filter processes"
-              value={filterText}
-              onChange={(e) => setFilterText(e.target.value)}
-            />
-            <div className="p-4">
-              <div className="h-64 overflow-auto bg-white border border-gray-200 rounded-md">
-                {filteredProcesses.map((process, index) => (
-                  <div
-                    key={index}
-                    className={`p-2 hover:bg-gray-100 ${
-                      selectedProcess?.pid === process.pid ? "bg-blue-100" : ""
-                    }`}
-                    onClick={() => handleSelectProcess(process)}
-                  >
-                    {process.pid}:{process.processname}
-                  </div>
-                ))}
+        {serverPid > 0 && (
+          <Card className="w-full max-w-md mb-6">
+            <CardHeader>
+              <CardTitle className="text-2xl">Process List</CardTitle>
+              <CardDescription>
+                After selecting a process, please open the process.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Input
+                placeholder="Filter processes"
+                value={filterText}
+                onChange={(e) => setFilterText(e.target.value)}
+              />
+              <div className="p-4">
+                <div className="h-64 overflow-auto bg-white border border-gray-200 rounded-md">
+                  {filteredProcesses.map((process, index) => (
+                    <div
+                      key={index}
+                      className={`p-2 hover:bg-gray-100 ${
+                        selectedProcess?.pid === process.pid
+                          ? "bg-blue-100"
+                          : ""
+                      }`}
+                      onClick={() => handleSelectProcess(process)}
+                    >
+                      {process.pid}:{process.processname}
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          </CardContent>
-          <CardFooter>
-            <Button className="w-full" onClick={openProcess}>
-              OpenProcess
-            </Button>
-          </CardFooter>
-        </Card>
+            </CardContent>
+            <CardFooter>
+              <Button className="w-full" onClick={openProcess}>
+                OpenProcess
+              </Button>
+            </CardFooter>
+          </Card>
+        )}
         {openedProcess && (
           <Card className="w-full max-w-md mb-6">
             <CardHeader>

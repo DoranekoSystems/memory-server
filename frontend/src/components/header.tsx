@@ -35,6 +35,12 @@ export function Header({ changePage }): any {
         </button>
         <button
           className="text-sm font-medium hover:underline underline-offset-4"
+          onClick={() => changePage("bookmark")}
+        >
+          Bookmark
+        </button>
+        <button
+          className="text-sm font-medium hover:underline underline-offset-4"
           onClick={() => changePage("memoryview")}
         >
           MemoryView
@@ -83,6 +89,15 @@ export function Header({ changePage }): any {
             }}
           >
             Scanner
+          </button>
+          <button
+            className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+            onClick={() => {
+              changePage("bookmark");
+              toggleMenu();
+            }}
+          >
+            Boookmark
           </button>
           <button
             className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"

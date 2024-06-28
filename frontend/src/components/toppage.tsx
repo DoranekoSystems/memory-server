@@ -1,5 +1,5 @@
 import Link from "next/link";
-import {CloudIcon,CodeIcon,LockIcon} from "./icon"
+import { CloudIcon, CodeIcon, LockIcon } from "./icon";
 
 export function TopPage() {
   return (
@@ -9,13 +9,21 @@ export function TopPage() {
           <div className="grid max-w-[1300px] mx-auto gap-4 px-4 sm:px-6 md:px-10 md:grid-cols-2 md:gap-16">
             <div>
               <h1 className="lg:leading-tighter text-3xl font-bold tracking-tighter sm:text-4xl md:text-5xl xl:text-[3.4rem] 2xl:text-[3.75rem]">
-                High-Speed Memory Scanner & Analyzer with REST API.
+                <span className="text-blue-600">Next Generation</span>{" "}
+                Browser-based Process Memory Analyser.
               </h1>
-              <p className="mx-auto max-w-[700px] text-gray-500 md:text-xl dark:text-gray-400">
-                Advanced yet User-Friendly Memory Analysis Engine and Debugger
-                for Security Diagnostics: A Convenient Tool for Research in
-                Cybersecurity.
-              </p>
+              <div className="mt-6 mb-8">
+                <p className="mx-auto max-w-[700px] text-gray-500 md:text-xl dark:text-gray-400">
+                  Empower your cybersecurity research with our cutting-edge
+                  memory analysis tool:
+                </p>
+                <ul className="list-disc list-inside mt-4 ml-4 text-gray-500 md:text-lg dark:text-gray-400">
+                  <li>Advanced memory inspection capabilities</li>
+                  <li>User-friendly interface for seamless debugging</li>
+                  <li>Robust security diagnostics at your fingertips</li>
+                  <li>Ideal for both professionals and researchers</li>
+                </ul>
+              </div>
               <div className="space-x-4">
                 <Link
                   className="inline-flex h-9 items-center justify-center rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-gray-50 shadow transition-colors hover:bg-gray-900/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-950 disabled:pointer-events-none disabled:opacity-50 dark:bg-gray-50 dark:text-gray-900 dark:hover:bg-gray-50/90 dark:focus-visible:ring-gray-300"

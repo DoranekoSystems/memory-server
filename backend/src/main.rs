@@ -1,8 +1,12 @@
+use chrono::Local;
 use ctor::ctor;
 use include_dir::{include_dir, Dir};
+use log::info;
+use log::LevelFilter;
 use std::env;
 use std::io::{stdout, Write};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use warp::http::Response;
 use warp::http::Uri;
 use warp::path::Tail;
@@ -10,6 +14,7 @@ use warp::Filter;
 
 mod allocator;
 mod api;
+mod logger;
 mod util;
 
 static STATIC_DIR: Dir = include_dir!("../frontend/out");
@@ -47,6 +52,8 @@ async fn main() {
     println!("memory_server has started listening on port 3030.");
     std::env::set_var("MEMORY_SERVER_RUNNING_MODE", "normal");
 
+    env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
+
     let cors = warp::cors()
         .allow_any_origin()
         .allow_headers(vec!["*", "Content-Type"])
@@ -61,6 +68,11 @@ async fn main() {
     let enumprocess = warp::path!("enumprocess")
         .and(warp::get())
         .and_then(api::enumerate_process_handler);
+
+    let enummodule = warp::path!("enummodule")
+        .and(warp::get())
+        .and(api::with_state(pid_state.clone()))
+        .and_then(|pid_state| async move { api::enummodule_handler(pid_state).await });
 
     let open_process = warp::path!("openprocess")
         .and(warp::post())
@@ -127,9 +139,13 @@ async fn main() {
         .or(memory_filter)
         .or(enumregions)
         .or(enumprocess)
+        .or(enummodule)
         .or(server_info)
         .or(static_files)
         .with(cors);
 
+    // let routes_with_log = routes.clone().with(warp::log::custom(logger::log));
+
+    api::native_api_init();
     warp::serve(routes).run(([0, 0, 0, 0], 3030)).await;
 }

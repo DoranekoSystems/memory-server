@@ -18,6 +18,7 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::env;
+use std::ffi::CStr;
 use std::ffi::CString;
 use std::fs::File;
 use std::io::Error;
@@ -38,6 +39,7 @@ use warp::{http::Response, http::StatusCode, Filter, Rejection, Reply};
 extern "C" {
     fn get_pid_native() -> i32;
     fn enumprocess_native(count: *mut usize) -> *mut ProcessInfo;
+    fn enummodule_native(pid: i32, count: *mut usize) -> *mut ModuleInfo;
     fn enumerate_regions_to_buffer(pid: i32, buffer: *mut u8, buffer_size: usize);
     fn read_memory_native(
         pid: libc::c_int,
@@ -53,12 +55,21 @@ extern "C" {
     ) -> libc::ssize_t;
     fn suspend_process(pid: i32) -> bool;
     fn resume_process(pid: i32) -> bool;
+    fn native_init() -> libc::c_void;
 }
 
 #[repr(C)]
 struct ProcessInfo {
     pid: i32,
     processname: *mut c_char,
+}
+
+#[repr(C)]
+struct ModuleInfo {
+    base: usize,
+    size: i32,
+    is_64bit: bool,
+    modulename: *mut c_char,
 }
 
 lazy_static! {
@@ -1141,11 +1152,14 @@ pub async fn enumerate_process_handler() -> Result<impl Reply, Rejection> {
     let mut count: usize = 0;
     let process_info_ptr = unsafe { enumprocess_native(&mut count) };
     let process_info_slice = unsafe { std::slice::from_raw_parts(process_info_ptr, count) };
-    let mut json_array = Vec::new();
 
+    let mut json_array = Vec::new();
     for i in 0..count {
-        let c_string = unsafe { std::ffi::CStr::from_ptr(process_info_slice[i].processname) };
-        let process_name = c_string.to_str().unwrap_or("Invalid UTF-8").to_string();
+        let process_name = unsafe {
+            CStr::from_ptr(process_info_slice[i].processname)
+                .to_string_lossy()
+                .into_owned()
+        };
         json_array.push(json!({
             "pid": process_info_slice[i].pid,
             "processname": process_name
@@ -1161,8 +1175,68 @@ pub async fn enumerate_process_handler() -> Result<impl Reply, Rejection> {
             "processname": "self".to_string()
         }));
     } else {
-        unsafe { libc::free(process_info_ptr as *mut libc::c_void) };
+        unsafe {
+            libc::free(process_info_ptr as *mut libc::c_void);
+        }
     }
+
     let json_response = warp::reply::json(&json_array);
     Ok(json_response)
+}
+
+pub async fn enummodule_handler(
+    pid_state: Arc<Mutex<Option<i32>>>,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    let pid = pid_state.lock().unwrap();
+    if let Some(pid) = *pid {
+        let mut count: usize = 0;
+        let module_info_ptr = unsafe { enummodule_native(pid, &mut count) };
+        let module_info_slice = unsafe { std::slice::from_raw_parts(module_info_ptr, count) };
+
+        let mut json_array = Vec::new();
+        for i in 0..count {
+            let module_name = unsafe {
+                CStr::from_ptr(module_info_slice[i].modulename)
+                    .to_string_lossy()
+                    .into_owned()
+            };
+            json_array.push(json!({
+                "base": module_info_slice[i].base,
+                "size": module_info_slice[i].size,
+                "is_64bit": module_info_slice[i].is_64bit,
+                "modulename": module_name
+            }));
+            unsafe { libc::free(module_info_slice[i].modulename as *mut libc::c_void) };
+        }
+
+        if count == 0 {
+            json_array.push(json!({
+                "error": format!("No modules found for process with PID: {}", pid)
+            }));
+        } else {
+            unsafe {
+                libc::free(module_info_ptr as *mut libc::c_void);
+            }
+        }
+
+        let result = json!({ "modules": json_array });
+        let result_string = result.to_string();
+        let response = Response::builder()
+            .header("Content-Type", "application/json")
+            .body(hyper::Body::from(result_string))
+            .unwrap();
+        Ok(response)
+    } else {
+        let response = Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(hyper::Body::from("Pid not set"))
+            .unwrap();
+        Ok(response)
+    }
+}
+
+pub fn native_api_init() {
+    unsafe {
+        native_init();
+    }
 }

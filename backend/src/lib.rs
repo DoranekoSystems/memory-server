@@ -11,6 +11,7 @@ use warp::Filter;
 
 mod allocator;
 mod api;
+mod logger;
 mod util;
 use std::thread;
 
@@ -47,6 +48,9 @@ fn main() {
         let handle = runtime.block_on(async {
             println!("memory_server has started listening on port 3030.");
             std::env::set_var("MEMORY_SERVER_RUNNING_MODE", "embedded");
+
+            env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
+
             let pid_state = Arc::new(Mutex::new(None));
 
             let cors = warp::cors()
@@ -61,6 +65,11 @@ fn main() {
             let enumprocess = warp::path!("enumprocess")
                 .and(warp::get())
                 .and_then(api::enumerate_process_handler);
+
+            let enummodule = warp::path!("enummodule")
+                .and(warp::get())
+                .and(api::with_state(pid_state.clone()))
+                .and_then(|pid_state| async move { api::enummodule_handler(pid_state).await });
 
             let open_process = warp::path!("openprocess")
                 .and(warp::post())
@@ -129,10 +138,15 @@ fn main() {
                 .or(memory_filter)
                 .or(enumregions)
                 .or(enumprocess)
+                .or(enummodule)
                 .or(server_info)
                 .or(static_files)
                 .with(cors);
-            warp::serve(routes).run(([0, 0, 0, 0], 3030)).await;
+
+            api::native_api_init();
+            // let routes_with_log = routes.with(warp::log::custom(logger::log));
+
+            warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
         });
     });
 }

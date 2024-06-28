@@ -19,6 +19,13 @@ typedef struct {
   char *processname;
 } ProcessInfo;
 
+typedef struct {
+  uintptr_t base;
+  int size;
+  bool is_64bit;
+  char *modulename;
+} ModuleInfo;
+
 #ifdef TARGET_IS_ANDROID
 typedef ssize_t (*process_vm_readv_func)(pid_t, const struct iovec *,
                                          unsigned long, const struct iovec *,
@@ -255,3 +262,7 @@ extern "C" ProcessInfo *enumprocess_native(size_t *count) {
 
 extern "C" bool suspend_process(pid_t pid) { return false; }
 extern "C" bool resume_process(pid_t pid) { return false; }
+extern "C" ModuleInfo *enummodule_native(pid_t pid, size_t *count) {
+  return nullptr;
+}
+extern "C" void native_init();

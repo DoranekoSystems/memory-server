@@ -38,6 +38,7 @@ fn main() {
             build.file("src/cpp/src/native_darwin.mm");
         }
         "ios" => {
+            println!("cargo:rustc-link-arg=-lc++");
             build.file("src/cpp/src/native_darwin.mm");
         }
         "android" => {

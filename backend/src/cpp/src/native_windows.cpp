@@ -12,6 +12,13 @@ typedef struct {
   char *processname;
 } ProcessInfo;
 
+typedef struct {
+  uintptr_t base;
+  int size;
+  bool is_64bit;
+  char *modulename;
+} ModuleInfo;
+
 extern "C" int get_pid_native() { return GetCurrentProcessId(); }
 
 extern "C" SSIZE_T read_memory_native(int pid, uintptr_t address, size_t size,
@@ -178,3 +185,7 @@ extern "C" ProcessInfo *enumprocess_native(size_t *count) {
 
 extern "C" bool suspend_process(pid_t pid) { return false; }
 extern "C" bool resume_process(pid_t pid) { return false; }
+extern "C" ModuleInfo *enummodule_native(pid_t pid, size_t *count) {
+  return nullptr;
+}
+extern "C" void native_init();

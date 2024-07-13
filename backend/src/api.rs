@@ -55,7 +55,7 @@ extern "C" {
     ) -> libc::ssize_t;
     fn suspend_process(pid: i32) -> bool;
     fn resume_process(pid: i32) -> bool;
-    fn native_init() -> libc::c_void;
+    fn native_init() -> libc::c_int;
 }
 
 #[repr(C)]

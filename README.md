@@ -1,4 +1,4 @@
-# Feiyan(飛燕)
+# memory-server
 
 Next Generation Browser-based Process Memory Analyser.  
 All data is bundled in one binary.

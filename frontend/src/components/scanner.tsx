@@ -446,7 +446,7 @@ export function Scanner({ currentPage }) {
                 disabled={!isFirstScan}
               />
             </div>
-            {targetOS == "ios" && (
+            {serverMode != "embedded" && (
               <NormalCheckbox
                 id="suspend"
                 label="Suspend the process during scanning"

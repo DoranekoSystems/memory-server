@@ -1,4 +1,4 @@
-name: Build and Cross-Compile
+name: Build
 
 on:
   workflow_dispatch:
@@ -85,11 +85,11 @@ jobs:
     - name: Upload iOS Artifact
       uses: actions/upload-artifact@v3
       with:
-        name: memory-server-ios-arm64
+        name: memory-server-ios-arm64-${{ env.VERSION }}
         path: target/aarch64-apple-ios/release/memory-server
 
     - name: Upload Android Artifact
       uses: actions/upload-artifact@v3
       with:
-        name: memory-server-android-arm64
+        name: memory-server-android-arm64-${{ env.VERSION }}
         path: target/aarch64-linux-android/release/memory-server

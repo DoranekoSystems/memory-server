@@ -77,4 +77,34 @@ This method allows the android device to operate on its own.
 
 # Build
 
+## Running the GitHub Actions Workflow Manually
+
+To build the project using GitHub Actions, follow these steps:
+
+1. Fork this repo
+
+2. Go to the "Actions" tab in your forked repository.
+
+3. In the left sidebar, click on the "Build" workflow.
+
+4. Above the list of workflow runs, click on "Run workflow".
+
+5. In the dialog box that appears:
+   - Select the branch you want to run the workflow on (usually "main").
+   - Enter a version tag for this build (e.g., "v1.0.0").
+
+6. Click "Run workflow" to start the build process.
+
+7. The workflow will start running, and you can monitor its progress in the Actions tab.
+
+8. Once the workflow completes successfully, you can download the built artifacts:
+   - Go to the completed workflow run.
+   - Scroll down to the "Artifacts" section.
+   - Click on the artifact names to download:
+     - `memory-server-ios-arm64-[version]`
+     - `memory-server-android-arm64-[version]`
+
+Note: Make sure you have the necessary permissions in your forked repository to run workflows and access artifacts.
+
+## Manual build
 For more information, please visit [Wiki](https://github.com/DoranekoSystems/memory-server/wiki/Build)

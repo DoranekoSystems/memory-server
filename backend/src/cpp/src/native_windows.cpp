@@ -24,6 +24,27 @@ typedef struct
     char *modulename;
 } ModuleInfo;
 
+int debug_log(const char *format, ...)
+{
+    va_list args;
+    va_start(args, format);
+
+    char tagged_format[256];
+    _snprintf_s(tagged_format, sizeof(tagged_format), _TRUNCATE, "[MEMORYSERVER] %s", format);
+
+    char buffer[1024];
+    int result = _vsnprintf_s(buffer, sizeof(buffer), _TRUNCATE, tagged_format, args);
+
+    if (result >= 0)
+    {
+        OutputDebugStringA(buffer);
+        printf("%s\n", buffer);
+    }
+
+    va_end(args);
+    return result;
+}
+
 extern "C" int get_pid_native()
 {
     return GetCurrentProcessId();
@@ -32,26 +53,26 @@ extern "C" int get_pid_native()
 extern "C" SSIZE_T read_memory_native(int pid, uintptr_t address, size_t size,
                                       unsigned char *buffer)
 {
-    // Open the process with read permissions
     HANDLE processHandle = OpenProcess(PROCESS_VM_READ, FALSE, pid);
     if (processHandle == NULL)
     {
-        // Failed to open process
+        debug_log("Error: Failed to open process %d for reading. Error code: %lu", pid,
+                  GetLastError());
         return -1;
     }
 
-    // Read the memory from the process
     SIZE_T bytesRead;
     if (ReadProcessMemory(processHandle, (LPCVOID)address, buffer, size, &bytesRead))
     {
-        // Successfully read memory
         CloseHandle(processHandle);
         return (SSIZE_T)bytesRead;
     }
     else
     {
-        // Failed to read memory
+        DWORD error = GetLastError();
         CloseHandle(processHandle);
+        debug_log("Error: Failed to read memory from process %d at address 0x%p. Error code: %lu",
+                  pid, (void *)address, error);
         return -1;
     }
 }
@@ -62,37 +83,40 @@ extern "C" SSIZE_T write_memory_native(int pid, void *address, size_t size, unsi
         PROCESS_VM_WRITE | PROCESS_VM_OPERATION | PROCESS_QUERY_INFORMATION, FALSE, pid);
     if (processHandle == NULL)
     {
-        printf("OpenProcess failed: %lu\n", GetLastError());
+        debug_log("Error: Failed to open process %d for writing. Error code: %lu", pid,
+                  GetLastError());
         return -1;
     }
 
     DWORD oldProtect;
-    BOOL protectResult =
-        VirtualProtectEx(processHandle, address, size, PAGE_EXECUTE_READWRITE, &oldProtect);
-    if (!protectResult)
+    if (!VirtualProtectEx(processHandle, address, size, PAGE_EXECUTE_READWRITE, &oldProtect))
     {
-        printf("VirtualProtectEx failed: %lu\n", GetLastError());
+        DWORD error = GetLastError();
+        debug_log("Error: VirtualProtectEx failed for process %d at address 0x%p. Error code: %lu",
+                  pid, address, error);
         CloseHandle(processHandle);
         return -1;
     }
 
     SIZE_T bytesWritten;
-    BOOL writeResult = WriteProcessMemory(processHandle, address, buffer, size, &bytesWritten);
-    if (!writeResult)
+    if (!WriteProcessMemory(processHandle, address, buffer, size, &bytesWritten))
     {
-        printf("WriteProcessMemory failed: %lu\n", GetLastError());
+        DWORD error = GetLastError();
+        debug_log(
+            "Error: WriteProcessMemory failed for process %d at address 0x%p. Error code: %lu", pid,
+            address, error);
         VirtualProtectEx(processHandle, address, size, oldProtect, &oldProtect);
         CloseHandle(processHandle);
         return -1;
     }
 
     DWORD tempProtect;
-    protectResult = VirtualProtectEx(processHandle, address, size, oldProtect, &tempProtect);
-    if (!protectResult)
+    if (!VirtualProtectEx(processHandle, address, size, oldProtect, &tempProtect))
     {
-        printf("VirtualProtectEx failed: %lu\n", GetLastError());
-        CloseHandle(processHandle);
-        return -1;
+        debug_log(
+            "Warning: Failed to restore memory protection for process %d at address 0x%p. Error "
+            "code: %lu",
+            pid, address, GetLastError());
     }
 
     CloseHandle(processHandle);
@@ -104,6 +128,7 @@ extern "C" void enumerate_regions_to_buffer(DWORD pid, char *buffer, size_t buff
     HANDLE processHandle = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
     if (processHandle == NULL)
     {
+        debug_log("Error: Failed to open process %lu. Error code: %lu", pid, GetLastError());
         snprintf(buffer, buffer_size, "Failed to open process\n");
         return;
     }
@@ -118,8 +143,6 @@ extern "C" void enumerate_regions_to_buffer(DWORD pid, char *buffer, size_t buff
                             : memInfo.State == MEM_RESERVE ? "r"
                                                            : " ";
 
-        // The permissions are approximated as Linux-like permissions, but not
-        // exactly the same.
         char permissions[5] = "----";
         if (memInfo.Protect &
             (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY))
@@ -134,7 +157,11 @@ extern "C" void enumerate_regions_to_buffer(DWORD pid, char *buffer, size_t buff
         char mappedFileName[MAX_PATH] = {0};
         if (memInfo.Type == MEM_MAPPED)
         {
-            GetMappedFileNameA(processHandle, addr, mappedFileName, sizeof(mappedFileName));
+            if (!GetMappedFileNameA(processHandle, addr, mappedFileName, sizeof(mappedFileName)))
+            {
+                debug_log("Warning: Failed to get mapped file name for address %p. Error code: %lu",
+                          addr, GetLastError());
+            }
         }
 
         int written = snprintf(buffer + offset, buffer_size - offset, "%p-%p %s %s %s %s\n", addr,
@@ -142,6 +169,7 @@ extern "C" void enumerate_regions_to_buffer(DWORD pid, char *buffer, size_t buff
                                (memInfo.Type == MEM_MAPPED ? "p" : " "), mappedFileName);
         if (written <= 0 || written >= buffer_size - offset)
         {
+            debug_log("Warning: Buffer full or write error. Stopping enumeration.");
             break;
         }
 
@@ -154,10 +182,10 @@ extern "C" void enumerate_regions_to_buffer(DWORD pid, char *buffer, size_t buff
 
 extern "C" ProcessInfo *enumprocess_native(size_t *count)
 {
-    // Take a snapshot of all processes in the system.
     HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (hSnapshot == INVALID_HANDLE_VALUE)
     {
+        debug_log("Error: Failed to create process snapshot. Error code: %lu", GetLastError());
         *count = 0;
         return nullptr;
     }
@@ -165,10 +193,9 @@ extern "C" ProcessInfo *enumprocess_native(size_t *count)
     PROCESSENTRY32W pe32;
     pe32.dwSize = sizeof(PROCESSENTRY32W);
 
-    // Retrieve information about the first process,
-    // and exit if unsuccessful
     if (!Process32FirstW(hSnapshot, &pe32))
     {
+        debug_log("Error: Failed to get first process. Error code: %lu", GetLastError());
         CloseHandle(hSnapshot);
         *count = 0;
         return nullptr;
@@ -182,32 +209,34 @@ extern "C" ProcessInfo *enumprocess_native(size_t *count)
         info.pid = pe32.th32ProcessID;
         info.processname = new char[MAX_PATH];
 
-        // Convert from wide characters to multi-byte characters
-        wcstombs(info.processname, pe32.szExeFile, MAX_PATH);
+        if (wcstombs(info.processname, pe32.szExeFile, MAX_PATH) == (size_t)-1)
+        {
+            debug_log("Warning: Failed to convert process name for PID %lu", info.pid);
+            strcpy(info.processname, "Unknown");
+        }
 
         processes.push_back(info);
     } while (Process32NextW(hSnapshot, &pe32));
 
     CloseHandle(hSnapshot);
 
-    // Allocate and populate the return array
     ProcessInfo *retArray = new ProcessInfo[processes.size()];
     for (size_t i = 0; i < processes.size(); i++)
     {
         retArray[i] = processes[i];
     }
 
-    // Set the count and return the array
     *count = processes.size();
     return retArray;
 }
 
 extern "C" bool suspend_process(int pid)
 {
-    HANDLE hThreadSnap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, pid);
+    HANDLE hThreadSnap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
     if (hThreadSnap == INVALID_HANDLE_VALUE)
     {
-        std::cerr << "Failed to create snapshot of threads." << std::endl;
+        debug_log("Error: Failed to create snapshot of threads for process %d. Error code: %lu",
+                  pid, GetLastError());
         return false;
     }
 
@@ -216,11 +245,13 @@ extern "C" bool suspend_process(int pid)
 
     if (!Thread32First(hThreadSnap, &te32))
     {
-        std::cerr << "Failed to get first thread." << std::endl;
+        debug_log("Error: Failed to get first thread for process %d. Error code: %lu", pid,
+                  GetLastError());
         CloseHandle(hThreadSnap);
         return false;
     }
 
+    bool suspended_any = false;
     do
     {
         if (te32.th32OwnerProcessID == pid)
@@ -228,31 +259,44 @@ extern "C" bool suspend_process(int pid)
             HANDLE hThread = OpenThread(THREAD_SUSPEND_RESUME, FALSE, te32.th32ThreadID);
             if (hThread == NULL)
             {
-                std::cerr << "Failed to open thread." << std::endl;
+                debug_log("Warning: Failed to open thread %lu for process %d. Error code: %lu",
+                          te32.th32ThreadID, pid, GetLastError());
                 continue;
             }
 
             if (SuspendThread(hThread) == (DWORD)-1)
             {
-                std::cerr << "Failed to suspend thread." << std::endl;
+                debug_log("Warning: Failed to suspend thread %lu for process %d. Error code: %lu",
+                          te32.th32ThreadID, pid, GetLastError());
                 CloseHandle(hThread);
                 continue;
             }
 
+            suspended_any = true;
             CloseHandle(hThread);
         }
     } while (Thread32Next(hThreadSnap, &te32));
 
     CloseHandle(hThreadSnap);
-    return true;
+
+    if (suspended_any)
+    {
+        return true;
+    }
+    else
+    {
+        debug_log("Warning: No threads were suspended for process %d", pid);
+        return false;
+    }
 }
 
 extern "C" bool resume_process(int pid)
 {
-    HANDLE hThreadSnap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, pid);
+    HANDLE hThreadSnap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
     if (hThreadSnap == INVALID_HANDLE_VALUE)
     {
-        std::cerr << "Failed to create snapshot of threads." << std::endl;
+        debug_log("Error: Failed to create snapshot of threads for process %d. Error code: %lu",
+                  pid, GetLastError());
         return false;
     }
 
@@ -261,11 +305,13 @@ extern "C" bool resume_process(int pid)
 
     if (!Thread32First(hThreadSnap, &te32))
     {
-        std::cerr << "Failed to get first thread." << std::endl;
+        debug_log("Error: Failed to get first thread for process %d. Error code: %lu", pid,
+                  GetLastError());
         CloseHandle(hThreadSnap);
         return false;
     }
 
+    bool resumed_any = false;
     do
     {
         if (te32.th32OwnerProcessID == pid)
@@ -273,23 +319,35 @@ extern "C" bool resume_process(int pid)
             HANDLE hThread = OpenThread(THREAD_SUSPEND_RESUME, FALSE, te32.th32ThreadID);
             if (hThread == NULL)
             {
-                std::cerr << "Failed to open thread." << std::endl;
+                debug_log("Warning: Failed to open thread %lu for process %d. Error code: %lu",
+                          te32.th32ThreadID, pid, GetLastError());
                 continue;
             }
 
             if (ResumeThread(hThread) == (DWORD)-1)
             {
-                std::cerr << "Failed to resume thread." << std::endl;
+                debug_log("Warning: Failed to resume thread %lu for process %d. Error code: %lu",
+                          te32.th32ThreadID, pid, GetLastError());
                 CloseHandle(hThread);
                 continue;
             }
 
+            resumed_any = true;
             CloseHandle(hThread);
         }
     } while (Thread32Next(hThreadSnap, &te32));
 
     CloseHandle(hThreadSnap);
-    return true;
+
+    if (resumed_any)
+    {
+        return true;
+    }
+    else
+    {
+        debug_log("Warning: No threads were resumed for process %d", pid);
+        return false;
+    }
 }
 
 extern "C" ModuleInfo *enummodule_native(int pid, size_t *count)

@@ -1,7 +1,5 @@
 use crate::allocator;
 use crate::api::lz4::EncoderBuilder;
-use crate::util;
-use crate::util::binary_search;
 use aho_corasick::AhoCorasick;
 use byteorder::{ByteOrder, LittleEndian};
 use hex;

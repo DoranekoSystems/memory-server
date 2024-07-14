@@ -1,0 +1,95 @@
+name: Build and Cross-Compile
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+jobs:
+  build:
+    runs-on: macos-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '20'
+
+    - name: Setup Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+
+    - name: Add iOS and Android targets
+      run: |
+        rustup target add aarch64-apple-ios
+        rustup target add aarch64-linux-android
+
+    - name: Setup Android NDK
+      uses: nttld/setup-ndk@v1
+      id: setup-ndk
+      with:
+        ndk-version: r26b
+
+    - name: Set NDK path
+      run: |
+        echo "ANDROID_NDK_HOME=${{ steps.setup-ndk.outputs.ndk-path }}" >> $GITHUB_ENV
+        echo "NDK_BIN_PATH=${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/darwin-x86_64/bin" >> $GITHUB_ENV
+      
+    - name: Set Android build environment
+      run: |
+        echo "ANDROID_TARGET=aarch64-linux-android" >> $GITHUB_ENV
+        echo "ANDROID_TARGET_CC=$NDK_BIN_PATH/aarch64-linux-android33-clang" >> $GITHUB_ENV
+        echo "ANDROID_TARGET_CXX=$NDK_BIN_PATH/aarch64-linux-android33-clang++" >> $GITHUB_ENV
+        echo "ANDROID_TARGET_AR=$NDK_BIN_PATH/llvm-ar" >> $GITHUB_ENV
+        echo "ANDROID_TARGET_LINKER=$NDK_BIN_PATH/aarch64-linux-android33-clang" >> $GITHUB_ENV
+
+    - name: Set iOS build environment
+      run: |
+        echo "IOS_TARGET=aarch64-apple-ios" >> $GITHUB_ENV
+        echo "IOS_TARGET_CC=$(xcrun --sdk iphoneos --find clang)" >> $GITHUB_ENV
+        echo "IOS_TARGET_CXX=$(xcrun --sdk iphoneos --find clang++)" >> $GITHUB_ENV
+        echo "IOS_TARGET_AR=$(xcrun --sdk iphoneos --find ar)" >> $GITHUB_ENV
+        echo "IOS_TARGET_LINKER=$(xcrun --sdk iphoneos --find clang)" >> $GITHUB_ENV
+
+    - name: Build Frontend
+      run: |
+        cd frontend
+        yarn install
+        yarn build
+
+    - name: Build Backend for iOS
+      run: |
+        cd backend
+        CARGO_TARGET_AARCH64_APPLE_IOS_LINKER=$IOS_TARGET_LINKER \
+        TARGET_AR=$IOS_TARGET_AR \
+        TARGET_CC=$IOS_TARGET_CC \
+        TARGET_CXX=$IOS_TARGET_CXX \
+        cargo build --target=$IOS_TARGET --release
+
+    - name: Build Backend for Android
+      run: |
+        cd backend
+        CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$ANDROID_TARGET_LINKER \
+        TARGET_AR=$ANDROID_TARGET_AR \
+        TARGET_CC=$ANDROID_TARGET_CC \
+        TARGET_CXX=$ANDROID_TARGET_CXX \
+        cargo build --target=$ANDROID_TARGET --release
+
+    - name: Upload iOS Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: memory-server-ios-arm64
+        path: target/aarch64-apple-ios/release/memory-server
+
+    - name: Upload Android Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: memory-server-android-arm64
+        path: target/aarch64-linux-android/release/memory-server

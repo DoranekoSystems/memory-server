@@ -126,6 +126,14 @@ fn main() {
                     |pid_state| async move { api::enumerate_regions_handler(pid_state).await },
                 );
 
+            let resolveaddr = warp::path!("resolveaddr")
+                .and(warp::get())
+                .and(warp::query::<api::ResolveAddrRequest>())
+                .and(api::with_state(pid_state.clone()))
+                .and_then(|resolve_addr_request, pid_state| async move {
+                    api::resolve_addr_handler(pid_state, resolve_addr_request).await
+                });
+
             let server_info = warp::path!("serverinfo")
                 .and(warp::get())
                 .and_then(api::server_info_handler);
@@ -139,6 +147,7 @@ fn main() {
                 .or(enumregions)
                 .or(enumprocess)
                 .or(enummodule)
+                .or(resolveaddr)
                 .or(server_info)
                 .or(static_files)
                 .with(cors);

@@ -21,7 +21,13 @@ import {
   convertToLittleEndianHex,
 } from "../lib/converter";
 
-import { getMemoryRegions, readProcessMemory } from "../lib/api";
+import {
+  getMemoryRegions,
+  readProcessMemory,
+  resolveAddress,
+} from "../lib/api";
+
+import { isHexadecimal } from "../lib/utils";
 
 export function Bookmark({ currentPage }) {
   const [addressRanges, setAddressRanges] = useState<[bigint, bigint][]>([
@@ -117,10 +123,19 @@ export function Bookmark({ currentPage }) {
     setNewDataType(value);
   };
 
-  const handleAddNewBookmark = () => {
+  const handleAddNewBookmark = async () => {
+    let resolveAddr = newAddress;
+    if (!isHexadecimal(newAddress)) {
+      let tmp = await resolveAddress(ipAddress, newAddress);
+      resolveAddr = BigInt(tmp).toString(16);
+    }
     setBookmarkLists([
       ...bookmarkLists,
-      { address: parseInt(newAddress, 16), type: newDataType },
+      {
+        address: parseInt(resolveAddr, 16),
+        type: newDataType,
+        query: newAddress,
+      },
     ]);
     setNewAddress("");
     setNewDataType("int32");

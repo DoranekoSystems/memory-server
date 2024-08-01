@@ -350,10 +350,104 @@ extern "C" bool resume_process(int pid)
     }
 }
 
-extern "C" ModuleInfo *enummodule_native(int pid, size_t *count)
+bool IsPE64Bit(HANDLE hProcess, LPVOID baseAddress)
 {
-    return nullptr;
+    IMAGE_DOS_HEADER dosHeader;
+    IMAGE_NT_HEADERS ntHeaders;
+
+    // Read the DOS header
+    if (!ReadProcessMemory(hProcess, baseAddress, &dosHeader, sizeof(dosHeader), nullptr))
+    {
+        return false;
+    }
+
+    // Check DOS signature
+    if (dosHeader.e_magic != IMAGE_DOS_SIGNATURE)
+    {
+        return false;
+    }
+
+    // Read the NT headers
+    if (!ReadProcessMemory(hProcess, (LPVOID)((DWORD_PTR)baseAddress + dosHeader.e_lfanew),
+                           &ntHeaders, sizeof(ntHeaders), nullptr))
+    {
+        return false;
+    }
+
+    // Check NT signature
+    if (ntHeaders.Signature != IMAGE_NT_SIGNATURE)
+    {
+        return false;
+    }
+
+    // Check the machine type
+    return ntHeaders.FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64;
 }
+
+extern "C" ModuleInfo *enummodule_native(DWORD pid, size_t *count)
+{
+    std::vector<ModuleInfo> modules;
+    HANDLE hModuleSnap = INVALID_HANDLE_VALUE;
+    MODULEENTRY32 me32;
+
+    // Take a snapshot of all modules in the specified process
+    hModuleSnap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
+    if (hModuleSnap == INVALID_HANDLE_VALUE)
+    {
+        *count = 0;
+        return nullptr;
+    }
+
+    // Set the size of the structure before using it
+    me32.dwSize = sizeof(MODULEENTRY32);
+
+    // Retrieve information about the first module
+    if (!Module32First(hModuleSnap, &me32))
+    {
+        CloseHandle(hModuleSnap);
+        *count = 0;
+        return nullptr;
+    }
+
+    // Open the process to read memory
+    HANDLE hProcess = OpenProcess(PROCESS_VM_READ, FALSE, pid);
+    if (hProcess == NULL)
+    {
+        CloseHandle(hModuleSnap);
+        *count = 0;
+        return nullptr;
+    }
+
+    // Now walk the module list of the process and add each module to our vector
+    do
+    {
+        ModuleInfo info;
+        info.base = reinterpret_cast<uintptr_t>(me32.modBaseAddr);
+        info.size = static_cast<int>(me32.modBaseSize);
+
+        // Check if the module is 64-bit by reading its PE header
+        info.is_64bit = IsPE64Bit(hProcess, me32.modBaseAddr);
+
+        // Allocate memory for the module name and copy it
+        size_t nameLength = strlen(me32.szModule) + 1;
+        info.modulename = new char[nameLength];
+        strcpy_s(info.modulename, nameLength, me32.szModule);
+
+        modules.push_back(info);
+    } while (Module32Next(hModuleSnap, &me32));
+
+    // Close handles
+    CloseHandle(hProcess);
+    CloseHandle(hModuleSnap);
+
+    // Allocate memory for the result array
+    *count = modules.size();
+    ModuleInfo *result = new ModuleInfo[*count];
+    std::copy(modules.begin(), modules.end(), result);
+
+    return result;
+}
+
 extern "C" int native_init()
 {
     return 1;

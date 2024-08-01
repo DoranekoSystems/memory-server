@@ -36,7 +36,8 @@ import {
   arrayBufferToLittleEndianHexString,
   convertFromLittleEndianHex,
 } from "../../lib/converter";
-import { readProcessMemory } from "../../lib/api";
+import { isHexadecimal } from "../../lib/utils";
+import { readProcessMemory, resolveAddress } from "../../lib/api";
 import { useStore } from "../global-store";
 
 const theme = createTheme({
@@ -113,9 +114,14 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists }) => {
     const updatedBookmarks = await Promise.all(
       bookMarkLists.map(async (bookmark, index) => {
         try {
+          let resolveAddr = bookmark.address;
+          if (!isHexadecimal(bookmark.query)) {
+            let tmp = await resolveAddress(ipAddress, bookmark.query);
+            resolveAddr = parseInt(BigInt(tmp).toString(16), 16);
+          }
           const memoryData = await readProcessMemory(
             ipAddress,
-            bookmark.address,
+            resolveAddr,
             getByteLengthFromScanType(bookmark.type, bookmark.value)
           );
           const updatedValue = memoryData
@@ -124,7 +130,7 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists }) => {
 
           const finalValue = isRowFrozen(index) ? bookmark.value : updatedValue;
 
-          return { ...bookmark, value: finalValue };
+          return { ...bookmark, address: resolveAddr, value: finalValue };
         } catch (error) {
           console.error("Error updating memory value:", error);
           return bookmark;
@@ -183,9 +189,13 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists }) => {
               console.error("Unsupported type:", bookmark.type);
               return;
           }
-
+          let resolveAddr = bookmark.address;
+          if (!isHexadecimal(bookmark.query)) {
+            let tmp = await resolveAddress(ipAddress, bookmark.query);
+            resolveAddr = parseInt(BigInt(tmp).toString(16), 16);
+          }
           await axios.post(`http://${ipAddress}:3030/writememory`, {
-            address: bookmark.address,
+            address: resolveAddr,
             buffer: Array.from(new Uint8Array(buffer)),
           });
 
@@ -307,15 +317,18 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists }) => {
 
     // Update the memory
     try {
+      let resolveAddr = updatedBookmark.address;
+      if (!isHexadecimal(updatedBookmark.query)) {
+        let tmp = await resolveAddress(ipAddress, updatedBookmark.query);
+        resolveAddr = parseInt(BigInt(tmp).toString(16), 16);
+      }
       await axios.post(`http://${ipAddress}:3030/writememory`, {
-        address: updatedBookmark.address,
+        address: resolveAddr,
         buffer: Array.from(new Uint8Array(buffer)),
       });
 
       console.log(
-        `Memory updated successfully for address: 0x${BigInt(
-          updatedBookmark.address
-        )
+        `Memory updated successfully for address: 0x${BigInt(resolveAddr)
           .toString(16)
           .toUpperCase()}`
       );

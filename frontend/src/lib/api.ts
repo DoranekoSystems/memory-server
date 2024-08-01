@@ -108,3 +108,18 @@ export async function readProcessMemory(
     console.error("Error in readProcessMemory:", error);
   }
 }
+
+export async function resolveAddress(ipAddress: String, query: String) {
+  try {
+    const response = await axios.get(`http://${ipAddress}:3030/resolveaddr`, {
+      params: { query },
+    });
+    if (response.status === 200) {
+      return response.data.address.toString(10);
+    } else {
+      console.error("Unexpected status code:", response.status);
+    }
+  } catch (error) {
+    console.error("Error in resolveAddress:", error);
+  }
+}

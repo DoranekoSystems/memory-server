@@ -114,6 +114,7 @@ async fn main() {
         .and_then(|scan_request, pid_state| async move {
             api::memory_scan_handler(pid_state, scan_request).await
         });
+
     let memory_filter = warp::path!("memoryfilter")
         .and(warp::post())
         .and(warp::body::json())
@@ -126,6 +127,14 @@ async fn main() {
         .and(warp::get())
         .and(api::with_state(pid_state.clone()))
         .and_then(|pid_state| async move { api::enumerate_regions_handler(pid_state).await });
+
+    let resolveaddr = warp::path!("resolveaddr")
+        .and(warp::get())
+        .and(warp::query::<api::ResolveAddrRequest>())
+        .and(api::with_state(pid_state.clone()))
+        .and_then(|resolve_addr_request, pid_state| async move {
+            api::resolve_addr_handler(pid_state, resolve_addr_request).await
+        });
 
     let server_info = warp::path!("serverinfo")
         .and(warp::get())
@@ -140,6 +149,7 @@ async fn main() {
         .or(enumregions)
         .or(enumprocess)
         .or(enummodule)
+        .or(resolveaddr)
         .or(server_info)
         .or(static_files)
         .with(cors);

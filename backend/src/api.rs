@@ -139,6 +139,178 @@ pub async fn open_process_handler(
     Ok(warp::reply::with_status("OK", warp::http::StatusCode::OK))
 }
 
+fn read_memory_64(pid: i32, address: u64) -> Result<u64, String> {
+    let mut buffer = [0u8; 8];
+    read_process_memory(pid, address as *mut libc::c_void, 8, &mut buffer).map_err(|e| {
+        format!(
+            "Failed to read 64-bit memory at address {:#x}: {}",
+            address, e
+        )
+    })?;
+    Ok(u64::from_le_bytes(buffer))
+}
+
+fn read_memory_32(pid: i32, address: u32) -> Result<u32, String> {
+    let mut buffer = [0u8; 4];
+    read_process_memory(pid, address as *mut libc::c_void, 4, &mut buffer).map_err(|e| {
+        format!(
+            "Failed to read 32-bit memory at address {:#x}: {}",
+            address, e
+        )
+    })?;
+    Ok(u32::from_le_bytes(buffer))
+}
+
+fn evaluate_expression(expr: &str) -> Result<isize, String> {
+    let re = regex::Regex::new(r"(\d+)\s*([+\-*/])\s*(\d+)").unwrap();
+    if let Some(caps) = re.captures(expr) {
+        let a: isize = caps[1]
+            .parse()
+            .map_err(|_| "Invalid number in expression".to_string())?;
+        let b: isize = caps[3]
+            .parse()
+            .map_err(|_| "Invalid number in expression".to_string())?;
+        match &caps[2] {
+            "+" => Ok(a + b),
+            "-" => Ok(a - b),
+            "*" => Ok(a * b),
+            "/" => Ok(a / b),
+            _ => Err("Unsupported operation".to_string()),
+        }
+    } else {
+        expr.parse().map_err(|_| "Invalid expression".to_string())
+    }
+}
+
+fn resolve_nested_address(
+    pid: i32,
+    nested_addr: &str,
+    modules: &Vec<serde_json::Value>,
+) -> Result<u64, String> {
+    let re =
+        regex::Regex::new(r"(\[)|(\])|([^\[\]]+)").map_err(|e| format!("Regex error: {}", e))?;
+    let mut stack = Vec::new();
+    let mut current_expr = String::new();
+
+    for cap in re.captures_iter(nested_addr) {
+        if let Some(_) = cap.get(1) {
+            if !current_expr.is_empty() {
+                stack.push(current_expr);
+                current_expr = String::new();
+            }
+            current_expr.push('[');
+        } else if let Some(_) = cap.get(2) {
+            if !current_expr.is_empty() {
+                let inner_value = resolve_single_level_address(&current_expr, modules)?;
+                let memory_value = read_memory_64(pid, inner_value)?;
+                if let Some(mut prev_expr) = stack.pop() {
+                    prev_expr.push_str(&format!("0x{:X}", memory_value));
+                    current_expr = prev_expr;
+                } else {
+                    current_expr = format!("0x{:X}", memory_value);
+                }
+            }
+            current_expr.push(']');
+        } else if let Some(m) = cap.get(3) {
+            current_expr.push_str(m.as_str());
+        }
+    }
+
+    resolve_single_level_address(&current_expr, modules)
+}
+
+fn resolve_single_level_address(
+    addr: &str,
+    modules: &Vec<serde_json::Value>,
+) -> Result<u64, String> {
+    let re = regex::Regex::new(r"([-+])?(?:\s*)((?:\w|-)+(?:\.\w+)*|\d+|0x[\da-fA-F]+)")
+        .map_err(|e| format!("Regex error: {}", e))?;
+    let mut current_address: u64 = 0;
+    let mut first_item = true;
+
+    for cap in re.captures_iter(addr) {
+        let op = cap.get(1).map_or("+", |m| m.as_str());
+        let part = cap.get(2).unwrap().as_str();
+
+        let value = if let Some(module_info) = modules.iter().find(|m| {
+            m["modulename"]
+                .as_str()
+                .map_or(false, |name| part.eq_ignore_ascii_case(name))
+        }) {
+            let base = module_info["base"].as_u64().ok_or("Invalid base address")?;
+            base
+        } else {
+            u64::from_str_radix(part.trim_start_matches("0x"), 16)
+                .map_err(|_| format!("Invalid number: {}", part))?
+        };
+
+        if first_item {
+            current_address = value;
+            first_item = false;
+        } else {
+            match op {
+                "+" => current_address = current_address.wrapping_add(value),
+                "-" => current_address = current_address.wrapping_sub(value),
+                _ => return Err(format!("Invalid operation: {}", op)),
+            }
+        }
+    }
+
+    Ok(current_address)
+}
+
+fn resolve_symbolic_address(
+    pid: i32,
+    symbolic_addr: &str,
+    modules: &Vec<serde_json::Value>,
+) -> Result<usize, String> {
+    let resolved = resolve_nested_address(pid, symbolic_addr, modules)?;
+    Ok(resolved as usize)
+}
+
+#[derive(Deserialize)]
+pub struct ResolveAddrRequest {
+    query: String,
+}
+
+pub async fn resolve_addr_handler(
+    pid_state: Arc<Mutex<Option<i32>>>,
+    resolve_addr: ResolveAddrRequest,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    let pid = pid_state.lock().unwrap();
+
+    if let Some(pid) = *pid {
+        let modules = enum_modules(pid).unwrap();
+        match resolve_symbolic_address(pid, &resolve_addr.query, &modules) {
+            Ok(resolved_address) => {
+                let result = json!({ "address": resolved_address });
+                let result_string = result.to_string();
+                let response = Response::builder()
+                    .header("Content-Type", "application/json")
+                    .body(hyper::Body::from(result_string))
+                    .unwrap();
+                Ok(response)
+            }
+            Err(e) => {
+                let response = Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(hyper::Body::from(format!(
+                        "Failed to resolve address: {}",
+                        e
+                    )))
+                    .unwrap();
+                return Ok(response);
+            }
+        }
+    } else {
+        let response = Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(hyper::Body::from("Pid not set"))
+            .unwrap();
+        Ok(response)
+    }
+}
+
 #[derive(Deserialize)]
 pub struct ReadMemoryRequest {
     address: usize,
@@ -1182,42 +1354,47 @@ pub async fn enumerate_process_handler() -> Result<impl Reply, Rejection> {
     Ok(json_response)
 }
 
+fn enum_modules(pid: i32) -> Result<(Vec<serde_json::Value>), String> {
+    let mut count: usize = 0;
+    let module_info_ptr = unsafe { enummodule_native(pid, &mut count) };
+
+    if module_info_ptr.is_null() {
+        return Err("Failed to enumerate modules".to_string());
+    }
+
+    let module_info_slice = unsafe { std::slice::from_raw_parts(module_info_ptr, count) };
+
+    let mut modules = Vec::new();
+
+    for info in module_info_slice {
+        let module_name = unsafe {
+            CStr::from_ptr(info.modulename)
+                .to_string_lossy()
+                .into_owned()
+        };
+
+        modules.push(json!({
+            "base": info.base,
+            "size": info.size,
+            "is_64bit": info.is_64bit,
+            "modulename": module_name
+        }));
+
+        unsafe { libc::free(info.modulename as *mut libc::c_void) };
+    }
+
+    unsafe { libc::free(module_info_ptr as *mut libc::c_void) };
+
+    Ok((modules))
+}
+
 pub async fn enummodule_handler(
     pid_state: Arc<Mutex<Option<i32>>>,
 ) -> Result<impl warp::Reply, warp::Rejection> {
     let pid = pid_state.lock().unwrap();
     if let Some(pid) = *pid {
-        let mut count: usize = 0;
-        let module_info_ptr = unsafe { enummodule_native(pid, &mut count) };
-        let module_info_slice = unsafe { std::slice::from_raw_parts(module_info_ptr, count) };
-
-        let mut json_array = Vec::new();
-        for i in 0..count {
-            let module_name = unsafe {
-                CStr::from_ptr(module_info_slice[i].modulename)
-                    .to_string_lossy()
-                    .into_owned()
-            };
-            json_array.push(json!({
-                "base": module_info_slice[i].base,
-                "size": module_info_slice[i].size,
-                "is_64bit": module_info_slice[i].is_64bit,
-                "modulename": module_name
-            }));
-            unsafe { libc::free(module_info_slice[i].modulename as *mut libc::c_void) };
-        }
-
-        if count == 0 {
-            json_array.push(json!({
-                "error": format!("No modules found for process with PID: {}", pid)
-            }));
-        } else {
-            unsafe {
-                libc::free(module_info_ptr as *mut libc::c_void);
-            }
-        }
-
-        let result = json!({ "modules": json_array });
+        let modules = enum_modules(pid).unwrap();
+        let result = json!({ "modules": modules });
         let result_string = result.to_string();
         let response = Response::builder()
             .header("Content-Type", "application/json")

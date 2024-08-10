@@ -25,10 +25,10 @@ import {
 import { readProcessMemory } from "../../lib/api";
 import { useStore } from "../global-store";
 
-const CustomTable = forwardRef((props, ref) => {
+const ScanTable = forwardRef((props, ref) => {
   const {
-    scanResults,
-    selectedIndices,
+    scanResults = [],
+    selectedIndices = [],
     handleSelect,
     dataType,
     setScanResults,
@@ -41,7 +41,7 @@ const CustomTable = forwardRef((props, ref) => {
   const ipAddress = useStore((state) => state.ipAddress);
   const [isMobile, setIsMobile] = useState(false);
 
-  const rowGetter = ({ index }) => scanResults[index];
+  const rowGetter = ({ index }) => scanResults[index] || {};
 
   const isRowSelected = (index) => selectedIndices.includes(index + 1);
 
@@ -51,7 +51,7 @@ const CustomTable = forwardRef((props, ref) => {
 
   const cellRenderer = useCallback(
     ({ cellData, columnIndex, rowIndex }) => {
-      const rowData = scanResults[rowIndex];
+      const rowData = scanResults[rowIndex] || {};
       switch (columnIndex) {
         case 0:
           return (
@@ -69,7 +69,7 @@ const CustomTable = forwardRef((props, ref) => {
               className={`${
                 isMobile ? "" : "p-4"
               } align-middle text-sm font-mono`}
-            >{`0x${BigInt(rowData.address)
+            >{`0x${BigInt(rowData.address || 0)
               .toString(16)
               .toUpperCase()}`}</TableCell>
           );
@@ -80,14 +80,14 @@ const CustomTable = forwardRef((props, ref) => {
                 isMobile ? "" : "p-4"
               } align-middle text-sm font-sans`}
             >
-              {convertFromLittleEndianHex(rowData.value, dataType)}
+              {convertFromLittleEndianHex(rowData.value || "", dataType)}
             </TableCell>
           );
         default:
           return null;
       }
     },
-    [convertFromLittleEndianHex, dataType, scanResults]
+    [isMobile, dataType, scanResults]
   );
 
   const headerRenderer = ({ label }) => (
@@ -121,10 +121,12 @@ const CustomTable = forwardRef((props, ref) => {
 
     const updateDisplayedRows = async () => {
       const { startIndex, stopIndex } = visibleRange;
+      const updatedResults = [...scanResults];
+      let hasUpdates = false;
 
       for (let i = startIndex; i <= stopIndex; i++) {
-        const result = scanResults[i];
-        if (result) {
+        const result = updatedResults[i];
+        if (result && result.address) {
           try {
             const memoryData = await readProcessMemory(
               ipAddress,
@@ -137,17 +139,18 @@ const CustomTable = forwardRef((props, ref) => {
             } else {
               updatedValue = arrayBufferToLittleEndianHexString(memoryData);
             }
-            setScanResults((prevResults) =>
-              prevResults.map((item) =>
-                item.address === result.address
-                  ? { ...item, value: updatedValue }
-                  : item
-              )
-            );
+            if (updatedValue !== result.value) {
+              updatedResults[i] = { ...result, value: updatedValue };
+              hasUpdates = true;
+            }
           } catch (error) {
             console.error("Error updating memory value:", error);
           }
         }
+      }
+
+      if (hasUpdates) {
+        setScanResults(updatedResults);
       }
     };
 
@@ -157,7 +160,7 @@ const CustomTable = forwardRef((props, ref) => {
       clearInterval(interval);
       window.removeEventListener("resize", handleResize);
     };
-  }, [scanResults, dataType, setScanResults, visibleRange]);
+  }, [ipAddress, dataType, visibleRange, scanResults, setScanResults]);
 
   return (
     <div ref={ref} className="w-full h-96">
@@ -211,4 +214,4 @@ const CustomTable = forwardRef((props, ref) => {
   );
 });
 
-export default CustomTable;
+export default ScanTable;

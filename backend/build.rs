@@ -39,6 +39,10 @@ fn main() {
         }
         "ios" => {
             println!("cargo:rustc-link-arg=-lc++");
+            println!("cargo:rustc-link-arg=-framework");
+            println!("cargo:rustc-link-arg=Foundation");
+            println!("cargo:rustc-link-arg=-framework");
+            println!("cargo:rustc-link-arg=UIKit");
             build.file("src/cpp/src/native_darwin.mm");
         }
         "android" => {

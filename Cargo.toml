@@ -2,3 +2,4 @@
 members = [
     "backend"
 ]
+resolver = "2"

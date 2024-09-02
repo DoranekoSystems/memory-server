@@ -3,12 +3,16 @@ import { cn } from "@/lib/utils";
 import { useState, useEffect } from "react";
 import { Label } from "@/components/ui/label";
 
-const NormalCheckbox = ({ id, label, defaultState, onStateChange }) => {
-  const [state, setState] = useState(defaultState);
+const NormalCheckbox = ({ id, label, value, onStateChange }) => {
+  const [internalState, setInternalState] = useState(value);
+
+  useEffect(() => {
+    setInternalState(value);
+  }, [value]);
 
   const handleClick = () => {
-    const newState = state == 0 ? 1 : 0;
-    setState(newState);
+    const newState = internalState === 0 ? 1 : 0;
+    setInternalState(newState);
     onStateChange(newState);
   };
 
@@ -16,7 +20,7 @@ const NormalCheckbox = ({ id, label, defaultState, onStateChange }) => {
     <div className="flex items-center space-x-2">
       <div
         className={`w-4 h-4 border border-gray-300 rounded-sm cursor-pointer ${
-          state === 1 ? "bg-blue-500" : ""
+          internalState === 1 ? "bg-blue-500" : ""
         }`}
         onClick={handleClick}
       />
@@ -25,8 +29,12 @@ const NormalCheckbox = ({ id, label, defaultState, onStateChange }) => {
   );
 };
 
-const TriStateCheckbox = ({ id, label, defaultState, onStateChange }) => {
-  const [state, setState] = useState(defaultState);
+const TriStateCheckbox = ({ id, label, value, onStateChange }) => {
+  const [state, setState] = useState(value);
+
+  useEffect(() => {
+    setState(value);
+  }, [value]);
 
   const handleClick = () => {
     const newState = (state + 1) % 3;

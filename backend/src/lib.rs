@@ -152,10 +152,8 @@ fn main() {
                 .or(static_files)
                 .with(cors);
 
-            api::native_api_init();
-            // let routes_with_log = routes.with(warp::log::custom(logger::log));
-
-            warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
+            api::native_api_init(1);
+            warp::serve(routes).run(([0, 0, 0, 0], 3030)).await;
         });
     });
 }

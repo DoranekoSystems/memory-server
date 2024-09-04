@@ -448,7 +448,7 @@ extern "C" ModuleInfo *enummodule_native(DWORD pid, size_t *count)
     return result;
 }
 
-extern "C" int native_init()
+extern "C" int native_init(int mode)
 {
     return 1;
 }

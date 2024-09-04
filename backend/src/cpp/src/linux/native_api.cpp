@@ -323,7 +323,7 @@ extern "C" ModuleInfo *enummodule_native(pid_t pid, size_t *count)
     return nullptr;
 }
 
-extern "C" int native_init()
+extern "C" int native_init(int mode)
 {
 #ifdef TARGET_IS_ANDROID
     void *handle = dlopen("libc.so", RTLD_NOW);

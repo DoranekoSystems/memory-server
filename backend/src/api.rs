@@ -53,7 +53,7 @@ extern "C" {
     ) -> libc::ssize_t;
     fn suspend_process(pid: i32) -> bool;
     fn resume_process(pid: i32) -> bool;
-    fn native_init() -> libc::c_int;
+    fn native_init(mode: i32) -> libc::c_int;
 }
 
 #[repr(C)]
@@ -1410,8 +1410,8 @@ pub async fn enummodule_handler(
     }
 }
 
-pub fn native_api_init() {
+pub fn native_api_init(mode: i32) {
     unsafe {
-        native_init();
+        native_init(mode);
     }
 }

@@ -604,7 +604,7 @@ extern "C" ModuleInfo *enummodule_native(pid_t pid, size_t *count)
     return result;
 }
 
-extern "C" int native_init()
+extern "C" int native_init(int mode)
 {
     void *libsystem_kernel = dlopen("/usr/lib/system/libsystem_kernel.dylib", RTLD_NOW);
     if (!libsystem_kernel)

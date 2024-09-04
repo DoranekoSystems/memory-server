@@ -154,8 +154,6 @@ async fn main() {
         .or(static_files)
         .with(cors);
 
-    // let routes_with_log = routes.clone().with(warp::log::custom(logger::log));
-
-    api::native_api_init();
+    api::native_api_init(0);
     warp::serve(routes).run(([0, 0, 0, 0], 3030)).await;
 }

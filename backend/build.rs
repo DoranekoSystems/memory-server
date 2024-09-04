@@ -32,10 +32,10 @@ fn main() {
     }
     match target_os.as_str() {
         "windows" => {
-            build.file("src/cpp/src/native_windows.cpp");
+            build.file("src/cpp/src/windows/native_api.cpp");
         }
         "macos" => {
-            build.file("src/cpp/src/native_darwin.mm");
+            build.file("src/cpp/src/darwin/native_api.mm");
         }
         "ios" => {
             println!("cargo:rustc-link-arg=-lc++");
@@ -43,20 +43,31 @@ fn main() {
             println!("cargo:rustc-link-arg=Foundation");
             println!("cargo:rustc-link-arg=-framework");
             println!("cargo:rustc-link-arg=UIKit");
-            build.file("src/cpp/src/native_darwin.mm");
+            println!("cargo:rustc-link-arg=-framework");
+            println!("cargo:rustc-link-arg=AVFoundation");
+            println!("cargo:rustc-link-arg=-framework");
+            println!("cargo:rustc-link-arg=CoreMedia");
+            println!("cargo:rustc-link-arg=-framework");
+            println!("cargo:rustc-link-arg=BackgroundTasks");
+            println!("cargo:rustc-link-arg=-framework");
+            println!("cargo:rustc-link-arg=SystemConfiguration");
+            build.file("src/cpp/src/darwin/native_api.mm");
         }
+
         "android" => {
             build.cpp_link_stdlib("stdc++");
             println!("cargo:rustc-link-lib=static=c++_static");
             println!("cargo:rustc-link-lib=static=c++abi");
             println!("cargo:rustc-link-lib=static=c++");
             build.flag_if_supported("-DTARGET_IS_ANDROID");
-            build.file("src/cpp/src/native_linux.cpp");
+            build.file("src/cpp/src/linux/native_api.cpp");
         }
+
         "linux" => {
             build.cpp(true);
-            build.file("src/cpp/src/native_linux.cpp");
+            build.file("src/cpp/src/linux/native_api.cpp");
         }
+
         _ => {
             panic!("Unsupported target OS");
         }

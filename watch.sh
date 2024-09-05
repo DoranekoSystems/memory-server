@@ -1,1 +1,0 @@
-cargo watch -w backend -w frontend -s "./build.sh --target ios"

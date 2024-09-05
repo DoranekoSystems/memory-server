@@ -8,6 +8,7 @@ import { MemoryView } from "@/components/memoryview";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
 import { Scanner } from "@/components/scanner";
+import { Modules } from "@/components/modules";
 import { Bookmark } from "@/components/bookmark";
 
 export default function Home() {
@@ -32,6 +33,9 @@ export default function Home() {
       </div>
       <div style={{ display: currentPage == "memoryview" ? "block" : "none" }}>
         <MemoryView currentPage={currentPage} />
+      </div>
+      <div style={{ display: currentPage == "information" ? "block" : "none" }}>
+        <Modules currentPage={currentPage} />
       </div>
       <Footer></Footer>
     </div>

@@ -45,6 +45,12 @@ export function Header({ changePage }): any {
         >
           MemoryView
         </button>
+        <button
+          className="text-sm font-medium hover:underline underline-offset-4"
+          onClick={() => changePage("information")}
+        >
+          Information
+        </button>
       </nav>
       <button
         className="ml-auto sm:hidden focus:outline-none"

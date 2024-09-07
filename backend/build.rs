@@ -52,6 +52,7 @@ fn main() {
             println!("cargo:rustc-link-arg=-framework");
             println!("cargo:rustc-link-arg=SystemConfiguration");
             build.file("src/cpp/src/darwin/native_api.mm");
+            build.file("src/cpp/src/darwin/file_api.mm");
         }
 
         "android" => {

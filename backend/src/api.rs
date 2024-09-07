@@ -9,6 +9,7 @@ use libc::{self, c_char, c_int, c_long, c_void, off_t, O_RDONLY};
 use lz4;
 use lz4::{block::compress, BlockMode};
 use memchr::{memmem, Memchr};
+use percent_encoding::percent_decode_str;
 use rayon::prelude::*;
 use regex::bytes::Regex;
 use serde::{Deserialize, Serialize};
@@ -21,7 +22,9 @@ use std::ffi::CString;
 use std::fs::File;
 use std::io::Error;
 use std::io::{BufRead, BufReader};
+use std::panic;
 use std::process;
+use std::slice;
 use std::str;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::RwLock;
@@ -54,6 +57,12 @@ extern "C" {
     fn suspend_process(pid: i32) -> bool;
     fn resume_process(pid: i32) -> bool;
     fn native_init(mode: i32) -> libc::c_int;
+    fn explore_directory(path: *const c_char, max_depth: i32) -> *mut libc::c_char;
+    fn read_file(
+        path: *const c_char,
+        size: *mut usize,
+        error_message: *mut *mut c_char,
+    ) -> *const c_void;
 }
 
 #[repr(C)]
@@ -1408,6 +1417,226 @@ pub async fn enummodule_handler(
             .unwrap();
         Ok(response)
     }
+}
+#[derive(Deserialize)]
+pub struct ExploreDirectoryRequest {
+    path: String,
+    max_depth: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct FileItem {
+    item_type: String,
+    name: String,
+    size: Option<i64>,
+    last_opened: Option<i64>,
+    children: Option<Vec<FileItem>>,
+}
+
+pub async fn explore_directory_handler(
+    req: ExploreDirectoryRequest,
+) -> Result<impl Reply, Rejection> {
+    let decoded_path = percent_decode_str(&req.path)
+        .decode_utf8_lossy()
+        .into_owned();
+
+    let c_path = match CString::new(decoded_path.clone()) {
+        Ok(path) => path,
+        Err(_) => {
+            return Ok(warp::reply::with_status(
+                warp::reply::json(&json!({
+                    "error": "Invalid path: contains null byte",
+                    "path": decoded_path,
+                    "max_depth": req.max_depth
+                })),
+                warp::http::StatusCode::BAD_REQUEST,
+            ))
+        }
+    };
+
+    let result = panic::catch_unwind(|| unsafe {
+        let result_ptr = explore_directory(c_path.as_ptr(), req.max_depth as c_int);
+        if result_ptr.is_null() {
+            return Err("Null pointer returned from explore_directory");
+        }
+        let result_str = CStr::from_ptr(result_ptr).to_string_lossy().into_owned();
+        libc::free(result_ptr as *mut libc::c_void);
+        Ok(result_str)
+    });
+
+    let result = match result {
+        Ok(Ok(result)) => result,
+        Ok(Err(err)) => {
+            return Ok(warp::reply::with_status(
+                warp::reply::json(&json!({
+                    "error": err,
+                    "path": decoded_path,
+                    "max_depth": req.max_depth
+                })),
+                warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+            ))
+        }
+        Err(_) => {
+            return Ok(warp::reply::with_status(
+                warp::reply::json(&json!({
+                    "error": "Process panicked during directory exploration",
+                    "path": decoded_path,
+                    "max_depth": req.max_depth
+                })),
+                warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+            ))
+        }
+    };
+
+    if result.starts_with("Error:") {
+        return Ok(warp::reply::with_status(
+            warp::reply::json(&json!({
+                "error": result,
+                "path": decoded_path,
+                "max_depth": req.max_depth
+            })),
+            warp::http::StatusCode::BAD_REQUEST,
+        ));
+    }
+
+    match panic::catch_unwind(|| parse_directory_structure(&result)) {
+        Ok(items) => Ok(warp::reply::with_status(
+            warp::reply::json(&items),
+            warp::http::StatusCode::OK,
+        )),
+        Err(_) => Ok(warp::reply::with_status(
+            warp::reply::json(&json!({
+                "error": "Process panicked during parsing of directory structure",
+                "path": decoded_path,
+                "max_depth": req.max_depth
+            })),
+            warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+        )),
+    }
+}
+
+fn parse_directory_structure(raw_data: &str) -> Vec<FileItem> {
+    let mut root_items = Vec::new(); // A vector to store root-level items
+    let mut stack: Vec<*mut FileItem> = Vec::new(); // A stack to manage the hierarchy, using raw pointers to avoid multiple mutable borrow issues
+
+    for line in raw_data.lines() {
+        // Calculate the indentation level by counting leading spaces and dividing by 2
+        let indent = line.chars().take_while(|&c| c == ' ').count() / 2;
+        let content = line.trim_start(); // Remove leading spaces from the line
+
+        // Determine if the line represents a directory or file by splitting at the colon
+        if let Some((item_type, rest)) = content.split_once(':') {
+            let mut new_item = match item_type {
+                "dir" => FileItem {
+                    item_type: "directory".to_string(),
+                    name: rest.to_string(),
+                    size: None,
+                    last_opened: None,
+                    children: None, // Initially set to None
+                },
+                "file" => {
+                    // Split the file line by commas to extract file name, size, and timestamp
+                    let parts: Vec<&str> = rest.split(',').collect();
+                    if parts.len() == 3 {
+                        FileItem {
+                            item_type: "file".to_string(),
+                            name: parts[0].to_string(),
+                            size: parts[1].parse().ok(), // Parse size as an integer
+                            last_opened: parts[2].parse().ok(), // Parse timestamp as an integer
+                            children: None,              // Files don't have children
+                        }
+                    } else {
+                        continue; // Skip invalid file lines
+                    }
+                }
+                _ => continue, // Skip unknown types
+            };
+
+            // Adjust the stack based on the indentation level (pop off if too deep)
+            while stack.len() > indent {
+                stack.pop();
+            }
+
+            if stack.is_empty() {
+                // If the stack is empty, we're at the root level
+                root_items.push(new_item);
+                // Push directory onto the stack if it has children
+                if item_type == "dir" {
+                    let last_ptr = root_items.last_mut().unwrap() as *mut FileItem;
+                    stack.push(last_ptr);
+                }
+            } else {
+                // If we're inside a directory, add the new item to the parent's children
+                unsafe {
+                    let parent = stack.last_mut().unwrap();
+                    if let Some(children) = &mut (**parent).children {
+                        children.push(new_item);
+                    } else {
+                        // Initialize children only when the directory has children
+                        (**parent).children = Some(vec![new_item]);
+                    }
+
+                    // Push directory onto the stack if it has children
+                    if item_type == "dir" {
+                        let last_ptr = (**parent).children.as_mut().unwrap().last_mut().unwrap()
+                            as *mut FileItem;
+                        stack.push(last_ptr);
+                    }
+                }
+            }
+        }
+    }
+
+    root_items
+}
+
+#[derive(Deserialize)]
+pub struct ReadFileRequest {
+    path: String,
+}
+
+pub async fn read_file_handler(req: ReadFileRequest) -> Result<Response<Body>, Rejection> {
+    let decoded_path = percent_decode_str(&req.path)
+        .decode_utf8_lossy()
+        .into_owned();
+
+    let path = std::path::Path::new(&decoded_path);
+
+    let c_path = CString::new(decoded_path.clone()).unwrap();
+    let mut size: usize = 0;
+    let mut error_ptr: *mut c_char = std::ptr::null_mut();
+
+    let data_ptr = unsafe {
+        read_file(
+            c_path.as_ptr(),
+            &mut size as *mut usize,
+            &mut error_ptr as *mut *mut c_char,
+        )
+    };
+
+    if !error_ptr.is_null() {
+        let error_message = unsafe { CStr::from_ptr(error_ptr).to_string_lossy().into_owned() };
+        unsafe { libc::free(error_ptr as *mut c_void) };
+        return Ok(Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .body(Body::from(error_message))
+            .unwrap());
+    }
+
+    if data_ptr.is_null() || size == 0 {
+        return Ok(Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::from("File not found or empty"))
+            .unwrap());
+    }
+
+    let data = unsafe { slice::from_raw_parts(data_ptr as *const u8, size) }.to_vec();
+    unsafe { libc::free(data_ptr as *mut c_void) };
+
+    Ok(Response::builder()
+        .header("Content-Type", "application/octet-stream")
+        .body(Body::from(data))
+        .unwrap())
 }
 
 pub fn native_api_init(mode: i32) {

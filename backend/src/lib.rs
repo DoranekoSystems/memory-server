@@ -134,6 +134,20 @@ fn main() {
                     api::resolve_addr_handler(pid_state, resolve_addr_request).await
                 });
 
+            let explore_directory = warp::path!("exploredirectory")
+                .and(warp::get())
+                .and(warp::query::<api::ExploreDirectoryRequest>())
+                .and_then(|explore_directory_request| async move {
+                    api::explore_directory_handler(explore_directory_request).await
+                });
+
+            let read_file = warp::path!("readfile")
+                .and(warp::get())
+                .and(warp::query::<api::ReadFileRequest>())
+                .and_then(|read_file_request| async move {
+                    api::read_file_handler(read_file_request).await
+                });
+
             let server_info = warp::path!("serverinfo")
                 .and(warp::get())
                 .and_then(api::server_info_handler);
@@ -148,6 +162,8 @@ fn main() {
                 .or(enumprocess)
                 .or(enummodule)
                 .or(resolveaddr)
+                .or(explore_directory)
+                .or(read_file)
                 .or(server_info)
                 .or(static_files)
                 .with(cors);

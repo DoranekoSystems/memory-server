@@ -1472,6 +1472,7 @@ dependencies = [
  "lz4",
  "memchr",
  "mime_guess",
+ "percent-encoding",
  "rayon",
  "regex",
  "serde",

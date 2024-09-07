@@ -8,8 +8,9 @@ import { MemoryView } from "@/components/memoryview";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
 import { Scanner } from "@/components/scanner";
-import { Modules } from "@/components/modules";
+import { Information } from "@/components/information";
 import { Bookmark } from "@/components/bookmark";
+import { FileView } from "@/components/fileexplorer";
 
 export default function Home() {
   const [currentPage, setCurrentPage] = useState("toppage");
@@ -35,7 +36,12 @@ export default function Home() {
         <MemoryView currentPage={currentPage} />
       </div>
       <div style={{ display: currentPage == "information" ? "block" : "none" }}>
-        <Modules currentPage={currentPage} />
+        <Information currentPage={currentPage} />
+      </div>
+      <div
+        style={{ display: currentPage == "fileexplorer" ? "block" : "none" }}
+      >
+        <FileView currentPage={currentPage} />
       </div>
       <Footer></Footer>
     </div>

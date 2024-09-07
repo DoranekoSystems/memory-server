@@ -30,6 +30,7 @@ lz4 = "1.24.0"
 log = "0.4"
 env_logger = "0.9"
 chrono = "0.4"
+percent-encoding = "2.3.1"
 
 [[bin]]
 name = "memory-server"

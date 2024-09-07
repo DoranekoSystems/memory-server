@@ -1,4 +1,6 @@
-#import <Foundation/Foundation.h>
+#import "file_api.h"
+#import <mach/mach.h>
+#import <sys/sysctl.h>
 
 @implementation DirectoryExplorer
 
@@ -83,33 +85,6 @@
 
 @end
 
-extern "C" const char *explore_directory(const char *path, int maxDepth)
-{
-    @autoreleasepool
-    {
-        NSString *nsPath = [NSString stringWithUTF8String:path];
-        NSError *error = nil;
-        NSString *result = [DirectoryExplorer exploreDirectory:nsPath
-                                                      maxDepth:maxDepth
-                                                         error:&error];
-
-        if (error)
-        {
-            NSString *errorString =
-                [NSString stringWithFormat:@"Error: %@", [error localizedDescription]];
-            return strdup([errorString UTF8String]);
-        }
-
-        return result ? strdup([result UTF8String]) : strdup("No results");
-    }
-}
-
-@interface FileReader : NSObject
-
-+ (NSData *)readFile:(NSString *)path error:(NSError **)error;
-
-@end
-
 @implementation FileReader
 
 + (NSData *)readFile:(NSString *)path error:(NSError **)error
@@ -132,7 +107,174 @@ extern "C" const char *explore_directory(const char *path, int maxDepth)
 
 @end
 
-extern "C" const void *read_file(const char *path, size_t *size, char **error_message)
+@implementation ProcessInfoRetriever
+
++ (NSDictionary *)getProcessInfo:(pid_t)pid
+{
+    NSMutableDictionary *info = [NSMutableDictionary dictionary];
+
+    pid_t currentPid = getpid();
+    debug_log("Current PID: %d, Target PID: %d", currentPid, pid);
+
+    if (pid == currentPid)
+    {
+        debug_log("Fetching info for current process.");
+
+        NSString *bundlePath = [[NSBundle mainBundle] bundlePath];
+        info[@"BundlePath"] = bundlePath;
+        debug_log("Bundle path: %s", [bundlePath UTF8String]);
+
+        NSArray *documentPaths =
+            NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+        NSString *documentDirectory = [documentPaths firstObject];
+        info[@"DocumentDirectory"] = documentDirectory;
+        debug_log("Document directory: %s", [documentDirectory UTF8String]);
+
+        NSArray *libraryPaths =
+            NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
+        NSString *libraryDirectory = [libraryPaths firstObject];
+        info[@"LibraryDirectory"] = libraryDirectory;
+        debug_log("Library directory: %s", [libraryDirectory UTF8String]);
+
+        NSArray *cachesPaths =
+            NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
+        NSString *cachesDirectory = [cachesPaths firstObject];
+        info[@"CachesDirectory"] = cachesDirectory;
+        debug_log("Caches directory: %s", [cachesDirectory UTF8String]);
+    }
+    else
+    {
+        debug_log("Fetching info for external process with PID: %d", pid);
+
+        char pathbuf[PROC_PIDPATHINFO_MAXSIZE];
+        int ret = proc_pidpath(pid, pathbuf, sizeof(pathbuf));
+
+        if (ret > 0)
+        {
+            NSString *executablePath = [NSString stringWithUTF8String:pathbuf];
+            if (executablePath != nil && executablePath.length > 0)
+            {
+                NSString *bundlePath = [executablePath stringByDeletingLastPathComponent];
+                if ([bundlePath hasSuffix:@".app"])
+                {
+                    info[@"BundlePath"] = bundlePath;
+                    debug_log("External bundle path: %s", [bundlePath UTF8String]);
+
+                    NSString *bundleIdentifier = [self bundleIdentifierForPath:bundlePath];
+                    if (bundleIdentifier != nil)
+                    {
+                        debug_log("Bundle Identifier: %s", [bundleIdentifier UTF8String]);
+
+                        NSString *containerPath = @"/var/mobile/Containers/Data/Application";
+                        NSArray *containerDirectories =
+                            [[NSFileManager defaultManager] contentsOfDirectoryAtPath:containerPath
+                                                                                error:nil];
+                        // debug_log("Container directories: %@", containerDirectories);
+
+                        for (NSString *directory in containerDirectories)
+                        {
+                            NSString *fullPath =
+                                [containerPath stringByAppendingPathComponent:directory];
+                            NSString *metadataPath = [fullPath
+                                stringByAppendingPathComponent:
+                                    @".com.apple.mobile_container_manager.metadata.plist"];
+                            // debug_log("Checking metadata path: %s", [metadataPath UTF8String]);
+
+                            NSDictionary *metadata =
+                                [NSDictionary dictionaryWithContentsOfFile:metadataPath];
+                            // debug_log("Metadata: %@", metadata);
+
+                            if ([metadata[@"MCMMetadataIdentifier"]
+                                    isEqualToString:bundleIdentifier])
+                            {
+                                info[@"DocumentDirectory"] =
+                                    [fullPath stringByAppendingPathComponent:@"Documents"];
+                                info[@"LibraryDirectory"] =
+                                    [fullPath stringByAppendingPathComponent:@"Library"];
+                                info[@"CachesDirectory"] =
+                                    [fullPath stringByAppendingPathComponent:@"Library/Caches"];
+                                debug_log("Matched container directory: %s", [fullPath UTF8String]);
+                                break;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        debug_log("Failed to retrieve bundle identifier for path: %s",
+                                  [bundlePath UTF8String]);
+                    }
+                }
+                else
+                {
+                    debug_log("Unexpected path format: %s", [bundlePath UTF8String]);
+                }
+            }
+            else
+            {
+                debug_log("Failed to convert path to NSString or empty string.");
+            }
+        }
+        else
+        {
+            info[@"Error"] = @"Failed to retrieve bundle path.";
+            debug_log("Failed to retrieve bundle path for PID: %d, proc_pidpath returned: %d", pid,
+                      ret);
+        }
+    }
+
+    return info;
+}
+
++ (NSString *)bundleIdentifierForPath:(NSString *)bundlePath
+{
+    // debug_log("Fetching bundle identifier for path: %s", [bundlePath UTF8String]);
+    NSString *infoPlistPath = [bundlePath stringByAppendingPathComponent:@"Info.plist"];
+
+    if ([[NSFileManager defaultManager] fileExistsAtPath:infoPlistPath])
+    {
+        NSDictionary *infoPlist = [NSDictionary dictionaryWithContentsOfFile:infoPlistPath];
+        if (infoPlist != nil)
+        {
+            // debug_log("Info.plist contents: %@", infoPlist);
+            return infoPlist[@"CFBundleIdentifier"];
+        }
+        else
+        {
+            debug_log("Failed to read Info.plist contents at path: %s", [infoPlistPath UTF8String]);
+        }
+    }
+    else
+    {
+        debug_log("Info.plist does not exist at path: %s", [infoPlistPath UTF8String]);
+    }
+
+    return nil;
+}
+
+@end
+
+const char *explore_directory(const char *path, int maxDepth)
+{
+    @autoreleasepool
+    {
+        NSString *nsPath = [NSString stringWithUTF8String:path];
+        NSError *error = nil;
+        NSString *result = [DirectoryExplorer exploreDirectory:nsPath
+                                                      maxDepth:maxDepth
+                                                         error:&error];
+
+        if (error)
+        {
+            NSString *errorString =
+                [NSString stringWithFormat:@"Error: %@", [error localizedDescription]];
+            return strdup([errorString UTF8String]);
+        }
+
+        return result ? strdup([result UTF8String]) : strdup("No results");
+    }
+}
+
+const void *read_file(const char *path, size_t *size, char **error_message)
 {
     @autoreleasepool
     {
@@ -162,5 +304,38 @@ extern "C" const void *read_file(const char *path, size_t *size, char **error_me
             *size = 0;
             return NULL;
         }
+    }
+}
+
+const char *get_application_info(pid_t pid)
+{
+    @autoreleasepool
+    {
+        NSDictionary *info = [ProcessInfoRetriever getProcessInfo:pid];
+
+        if (![NSJSONSerialization isValidJSONObject:info])
+        {
+            debug_log("Error: info dictionary contains non-serializable objects");
+            return strdup("Error: info dictionary contains non-serializable objects");
+        }
+
+        NSError *error = nil;
+        NSData *jsonData = [NSJSONSerialization dataWithJSONObject:info options:0 error:&error];
+
+        if (error)
+        {
+            NSString *errorString =
+                [NSString stringWithFormat:@"Error: %@", [error localizedDescription]];
+            return strdup([errorString UTF8String]);
+        }
+
+        NSString *jsonString = [[NSString alloc] initWithData:jsonData
+                                                     encoding:NSUTF8StringEncoding];
+        if (jsonString != nil)
+        {
+            return strdup([jsonString UTF8String]);
+        }
+
+        return strdup("Failed to generate JSON string");
     }
 }

@@ -1,13 +1,10 @@
+#include "native_api.h"
 #include <Foundation/Foundation.h>
 #include <dlfcn.h>
 #include <errno.h>
 #include <mach-o/dyld_images.h>
 #include <mach-o/fat.h>
 #include <mach-o/loader.h>
-#include <mach/mach.h>
-#include <mach/task.h>
-#include <mach/vm_map.h>
-#include <mach/vm_region.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/queue.h>
@@ -16,35 +13,8 @@
 #include <string>
 #include <vector>
 
-typedef struct
-{
-    int pid;
-    const char *processname;
-} ProcessInfo;
-
-typedef struct
-{
-    uintptr_t base;
-    int size;
-    bool is_64bit;
-    char *modulename;
-} ModuleInfo;
-
-extern "C" kern_return_t mach_vm_read_overwrite(vm_map_t, mach_vm_address_t, mach_vm_size_t,
-                                                mach_vm_address_t, mach_vm_size_t *);
-
-extern "C" kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
-                                       mach_msg_type_number_t);
-
-extern "C" kern_return_t mach_vm_protect(vm_map_t, mach_vm_address_t, mach_vm_size_t, boolean_t,
-                                         vm_prot_t);
-
-extern "C" kern_return_t mach_vm_region(vm_map_t, mach_vm_address_t *, mach_vm_size_t *,
-                                        vm_region_flavor_t, vm_region_info_t,
-                                        mach_msg_type_number_t *, mach_port_t *);
-
-typedef int (*PROC_REGIONFILENAME)(int pid, uint64_t address, void *buffer, uint32_t buffersize);
 PROC_REGIONFILENAME proc_regionfilename = nullptr;
+PROC_PIDPATH proc_pidpath = nullptr;
 
 int debug_log(const char *format, ...)
 {
@@ -59,13 +29,13 @@ int debug_log(const char *format, ...)
     return 0;
 }
 
-extern "C" pid_t get_pid_native()
+pid_t get_pid_native()
 {
     return getpid();
 }
 
-extern "C" ssize_t read_memory_native(int pid, mach_vm_address_t address, mach_vm_size_t size,
-                                      unsigned char *buffer)
+ssize_t read_memory_native(int pid, mach_vm_address_t address, mach_vm_size_t size,
+                           unsigned char *buffer)
 {
     mach_port_t task;
     kern_return_t kr;
@@ -95,8 +65,8 @@ extern "C" ssize_t read_memory_native(int pid, mach_vm_address_t address, mach_v
     return static_cast<ssize_t>(out_size);
 }
 
-extern "C" ssize_t write_memory_native(int pid, mach_vm_address_t address, mach_vm_size_t size,
-                                       unsigned char *buffer)
+ssize_t write_memory_native(int pid, mach_vm_address_t address, mach_vm_size_t size,
+                            unsigned char *buffer)
 {
     task_t task;
     kern_return_t err;
@@ -128,7 +98,6 @@ extern "C" ssize_t write_memory_native(int pid, mach_vm_address_t address, mach_
 
     mach_vm_address_t region_address = address;
     mach_vm_size_t region_size = size;
-    // Get the current protection
     err = mach_vm_region(task, &region_address, &region_size, VM_REGION_BASIC_INFO_64,
                          (vm_region_info_t)&info, &info_count, &object_name);
     if (err != KERN_SUCCESS)
@@ -144,7 +113,6 @@ extern "C" ssize_t write_memory_native(int pid, mach_vm_address_t address, mach_
     }
     original_protection = info.protection;
 
-    // Change the memory protection to allow writing
     err = mach_vm_protect(task, address, size, false, VM_PROT_READ | VM_PROT_WRITE);
     if (err != KERN_SUCCESS)
     {
@@ -157,15 +125,13 @@ extern "C" ssize_t write_memory_native(int pid, mach_vm_address_t address, mach_
         return -1;
     }
 
-    // Write to memory
     err = mach_vm_write(task, address, (vm_offset_t)buffer, size);
     if (err != KERN_SUCCESS)
     {
         debug_log("Error: mach_vm_write failed with error %d (%s) at address "
                   "0x%llx, size 0x%llx\n",
                   err, mach_error_string(err), address, size);
-        mach_vm_protect(task, address, size, false,
-                        original_protection);  // Attempt to restore protection
+        mach_vm_protect(task, address, size, false, original_protection);
         if (!is_embedded_mode)
         {
             task_resume(task);
@@ -173,7 +139,6 @@ extern "C" ssize_t write_memory_native(int pid, mach_vm_address_t address, mach_
         return -1;
     }
 
-    // Reset the memory protection
     err = mach_vm_protect(task, address, size, false, original_protection);
     if (err != KERN_SUCCESS)
     {
@@ -194,7 +159,7 @@ extern "C" ssize_t write_memory_native(int pid, mach_vm_address_t address, mach_
     return static_cast<ssize_t>(size);
 }
 
-extern "C" void enumerate_regions_to_buffer(pid_t pid, char *buffer, size_t buffer_size)
+void enumerate_regions_to_buffer(pid_t pid, char *buffer, size_t buffer_size)
 {
     task_t task;
     kern_return_t err;
@@ -252,7 +217,7 @@ extern "C" void enumerate_regions_to_buffer(pid_t pid, char *buffer, size_t buff
     }
 }
 
-extern "C" ProcessInfo *enumprocess_native(size_t *count)
+ProcessInfo *enumprocess_native(size_t *count)
 {
     int err;
     struct kinfo_proc *result;
@@ -328,7 +293,7 @@ extern "C" ProcessInfo *enumprocess_native(size_t *count)
     }
 }
 
-extern "C" bool suspend_process(pid_t pid)
+bool suspend_process(pid_t pid)
 {
     task_t task;
     kern_return_t err;
@@ -354,7 +319,7 @@ extern "C" bool suspend_process(pid_t pid)
     return true;
 }
 
-extern "C" bool resume_process(pid_t pid)
+bool resume_process(pid_t pid)
 {
     task_t task;
     kern_return_t err;
@@ -526,16 +491,27 @@ static std::uint64_t get_module_size(int pid, mach_vm_address_t address, bool *i
     return 0;
 }
 
-extern "C" ModuleInfo *enummodule_native(pid_t pid, size_t *count)
+ModuleInfo *enummodule_native(pid_t pid, size_t *count)
 {
     task_t task;
-    if (task_for_pid(mach_task_self(), pid, &task) != KERN_SUCCESS)
-    {
-        debug_log("Error: Failed to get task for pid %d\n", pid);
-        *count = 0;
-        return nullptr;
-    }
+    kern_return_t err;
+    bool is_embedded_mode = pid == getpid();
 
+    if (is_embedded_mode)
+    {
+        task = mach_task_self();
+    }
+    else
+    {
+        err = task_for_pid(mach_task_self(), pid, &task);
+        if (err != KERN_SUCCESS)
+        {
+            debug_log("Error: task_for_pid failed with error %d (%s)\n", err,
+                      mach_error_string(err));
+            *count = 0;
+            return nullptr;
+        }
+    }
     task_dyld_info dyld_info;
     mach_msg_type_number_t count_info = TASK_DYLD_INFO_COUNT;
 
@@ -604,7 +580,7 @@ extern "C" ModuleInfo *enummodule_native(pid_t pid, size_t *count)
     return result;
 }
 
-extern "C" int native_init(int mode)
+int native_init(int mode)
 {
     void *libsystem_kernel = dlopen("/usr/lib/system/libsystem_kernel.dylib", RTLD_NOW);
     if (!libsystem_kernel)
@@ -616,8 +592,21 @@ extern "C" int native_init(int mode)
     // Clear any existing error
     dlerror();
 
+    proc_pidpath = (PROC_PIDPATH)dlsym(libsystem_kernel, "proc_pidpath");
+    char *dlsym_error = dlerror();
+    if (dlsym_error)
+    {
+        debug_log("Error: Failed to load proc_pidpath symbol: %s\n", dlsym_error);
+        proc_pidpath = nullptr;
+    }
+
+    if (proc_pidpath == nullptr)
+    {
+        debug_log("Warning: proc_pidpath is not available. Some functionality may be limited.\n");
+    }
+
     proc_regionfilename = (PROC_REGIONFILENAME)dlsym(libsystem_kernel, "proc_regionfilename");
-    const char *dlsym_error = dlerror();
+    dlsym_error = dlerror();
     if (dlsym_error)
     {
         debug_log("Error: Failed to load proc_regionfilename symbol: %s\n", dlsym_error);

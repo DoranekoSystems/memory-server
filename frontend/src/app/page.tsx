@@ -21,7 +21,7 @@ export default function Home() {
     <div className="flex flex-col min-h-screen">
       <Header changePage={setCurrentPage}></Header>
       <div style={{ display: currentPage == "toppage" ? "block" : "none" }}>
-        <TopPage />
+        <TopPage changePage={setCurrentPage} />
       </div>
       <div style={{ display: currentPage == "setting" ? "block" : "none" }}>
         <Setting currentPage={currentPage} />

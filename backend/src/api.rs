@@ -63,6 +63,7 @@ extern "C" {
         size: *mut usize,
         error_message: *mut *mut c_char,
     ) -> *const c_void;
+    fn get_application_info(pid: c_int) -> *const c_char;
 }
 
 #[repr(C)]
@@ -1637,6 +1638,39 @@ pub async fn read_file_handler(req: ReadFileRequest) -> Result<Response<Body>, R
         .header("Content-Type", "application/octet-stream")
         .body(Body::from(data))
         .unwrap())
+}
+
+pub async fn get_app_info_handler(
+    pid_state: Arc<Mutex<Option<i32>>>,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    let pid = pid_state.lock().unwrap();
+    if let Some(pid) = *pid {
+        let result = unsafe {
+            let raw_ptr = get_application_info(pid as c_int);
+            if raw_ptr.is_null() {
+                return Ok(warp::reply::with_status(
+                    warp::reply::json(&json!({"error": "Failed to get application info"})),
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                ));
+            }
+
+            let c_str = CStr::from_ptr(raw_ptr);
+            let result_str = c_str.to_str().unwrap_or("Invalid UTF-8").to_owned();
+            libc::free(raw_ptr as *mut libc::c_void);
+
+            result_str
+        };
+
+        Ok(warp::reply::with_status(
+            warp::reply::json(&json!({ "info": result })),
+            StatusCode::OK,
+        ))
+    } else {
+        Ok(warp::reply::with_status(
+            warp::reply::json(&json!({"error": "Pid not set"})),
+            StatusCode::BAD_REQUEST,
+        ))
+    }
 }
 
 pub fn native_api_init(mode: i32) {

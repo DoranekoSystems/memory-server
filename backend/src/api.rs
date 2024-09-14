@@ -1,25 +1,22 @@
-use crate::allocator;
-use crate::api::lz4::EncoderBuilder;
-use aho_corasick::AhoCorasick;
 use byteorder::{ByteOrder, LittleEndian};
 use hex;
 use lazy_static::lazy_static;
-use libc::int8_t;
-use libc::{self, c_char, c_int, c_long, c_void, off_t, O_RDONLY};
+use libc::{self, c_char, c_int, c_void};
 use lz4;
-use lz4::{block::compress, BlockMode};
-use memchr::{memmem, Memchr};
+use lz4::block::compress;
+use memchr::memmem;
 use percent_encoding::percent_decode_str;
 use rayon::prelude::*;
 use regex::bytes::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
-use std::collections::VecDeque;
+
 use std::env;
 use std::ffi::CStr;
 use std::ffi::CString;
-use std::fs::File;
+
+use log::{debug, error, info, trace, warn};
 use std::io::Error;
 use std::io::{BufRead, BufReader};
 use std::panic;
@@ -29,10 +26,22 @@ use std::str;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::RwLock;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 use warp::hyper::Body;
-use warp::redirect::found;
 use warp::{http::Response, http::StatusCode, Filter, Rejection, Reply};
+
+#[no_mangle]
+pub extern "C" fn native_log(level: c_int, message: *const c_char) {
+    let log_message = unsafe { CStr::from_ptr(message).to_string_lossy().into_owned() };
+
+    match level {
+        0 => trace!("{}", log_message),
+        1 => debug!("{}", log_message),
+        2 => info!("{}", log_message),
+        3 => warn!("{}", log_message),
+        4 => error!("{}", log_message),
+        _ => info!("{}", log_message),
+    }
+}
 
 #[cfg_attr(target_os = "android", link(name = "c++_static", kind = "static"))]
 #[cfg_attr(target_os = "android", link(name = "c++abi", kind = "static"))]
@@ -160,7 +169,7 @@ fn read_memory_64(pid: i32, address: u64) -> Result<u64, String> {
     Ok(u64::from_le_bytes(buffer))
 }
 
-fn read_memory_32(pid: i32, address: u32) -> Result<u32, String> {
+fn _read_memory_32(pid: i32, address: u32) -> Result<u32, String> {
     let mut buffer = [0u8; 4];
     read_process_memory(pid, address as *mut libc::c_void, 4, &mut buffer).map_err(|e| {
         format!(
@@ -171,7 +180,7 @@ fn read_memory_32(pid: i32, address: u32) -> Result<u32, String> {
     Ok(u32::from_le_bytes(buffer))
 }
 
-fn evaluate_expression(expr: &str) -> Result<isize, String> {
+fn _evaluate_expression(expr: &str) -> Result<isize, String> {
     let re = regex::Regex::new(r"(\d+)\s*([+\-*/])\s*(\d+)").unwrap();
     if let Some(caps) = re.captures(expr) {
         let a: isize = caps[1]
@@ -671,7 +680,7 @@ pub async fn memory_scan_handler(
             if let Some(positions) = global_positions.get(&scan_request.scan_id) {
                 let limited_positions = &positions[..std::cmp::min(MAX_RESULTS, positions.len())];
                 let count = found_count.load(Ordering::SeqCst);
-                let mut is_rounded: bool;
+                let is_rounded: bool;
                 if scan_request.find_type == "unknown" {
                     if count > 1_000_000 {
                         is_rounded = true;
@@ -682,7 +691,6 @@ pub async fn memory_scan_handler(
                     is_rounded = limited_positions.len() != positions.len();
                 }
                 let matched_addresses: Vec<serde_json::Value> = limited_positions
-                    .clone()
                     .into_iter()
                     .map(|(address, value)| {
                         json!({
@@ -711,7 +719,7 @@ pub async fn memory_scan_handler(
             }
         } else {
             let global_positions = GLOBAL_POSITIONS.read().unwrap();
-            if let Some(positions) = global_positions.get(&scan_request.scan_id) {
+            if let Some(_positions) = global_positions.get(&scan_request.scan_id) {
                 let count = found_count.load(Ordering::SeqCst);
                 let result_string = json!({ "found": count }).to_string();
                 let response = Response::builder()
@@ -770,7 +778,7 @@ pub async fn memory_filter_handler(
         let mut new_positions = Vec::new();
         let mut global_positions = GLOBAL_POSITIONS.write().unwrap();
         let mut global_memory = GLOBAL_MEMORY.write().unwrap();
-        let mut global_scan_option = GLOBAL_SCAN_OPTION.write().unwrap();
+        let global_scan_option = GLOBAL_SCAN_OPTION.write().unwrap();
         let scan_option: MemoryScanRequest = global_scan_option
             .get(&filter_request.scan_id)
             .unwrap()
@@ -803,7 +811,6 @@ pub async fn memory_filter_handler(
                 let decompressed_data =
                     lz4::block::decompress(compressed_data, Some(*uncompressed_data_size as i32))
                         .unwrap();
-                let mut decompressed_offsets: Vec<i32>;
                 let mut buffer: Vec<u8> = vec![0; (decompressed_data.len()) as usize];
                 let _nread = match read_process_memory(
                     pid,
@@ -812,7 +819,7 @@ pub async fn memory_filter_handler(
                     &mut buffer,
                 ) {
                     Ok(nread) => nread,
-                    Err(err) => -1,
+                    Err(_err) => -1,
                 };
 
                 if _nread == -1 {
@@ -959,7 +966,7 @@ pub async fn memory_filter_handler(
                         &mut buffer,
                     ) {
                         Ok(nread) => nread,
-                        Err(err) => -1,
+                        Err(_err) => -1,
                     };
 
                     if _nread == -1 {
@@ -1005,7 +1012,7 @@ pub async fn memory_filter_handler(
                                     return Err(response);
                                 }
                             };
-                            let mut pass_filter = false;
+                            let pass_filter: bool;
 
                             pass_filter = match filter_request.data_type.as_str() {
                                 "int8" => {
@@ -1187,7 +1194,7 @@ pub async fn memory_filter_handler(
         if filter_request.return_as_json {
             let limited_positions =
                 &new_positions[..std::cmp::min(MAX_RESULTS, new_positions.len())];
-            let mut is_rounded: bool;
+            let is_rounded: bool;
             let count = found_count.load(Ordering::SeqCst);
             if scan_option.find_type == "unknown" {
                 if count > 1_000_000 {
@@ -1199,7 +1206,6 @@ pub async fn memory_filter_handler(
                 is_rounded = limited_positions.len() != new_positions.len();
             }
             let matched_addresses: Vec<serde_json::Value> = limited_positions
-                .clone()
                 .iter()
                 .map(|(address, value)| {
                     json!({
@@ -1297,14 +1303,19 @@ pub async fn enumerate_regions_handler(
         for line in buffer_reader.lines() {
             if let Ok(line) = line {
                 let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 2 {
+
+                if parts.len() >= 5 {
                     let addresses: Vec<&str> = parts[0].split('-').collect();
                     if addresses.len() == 2 {
                         let region = Region {
                             start_address: addresses[0].to_string(),
                             end_address: addresses[1].to_string(),
                             protection: parts[1].to_string(),
-                            file_path: parts.get(2).map(|s| s.to_string()),
+                            file_path: if parts.len() > 5 {
+                                Some(parts[5..].join(" "))
+                            } else {
+                                None
+                            },
                         };
                         regions.push(region);
                     }
@@ -1364,7 +1375,7 @@ pub async fn enumerate_process_handler() -> Result<impl Reply, Rejection> {
     Ok(json_response)
 }
 
-fn enum_modules(pid: i32) -> Result<(Vec<serde_json::Value>), String> {
+fn enum_modules(pid: i32) -> Result<Vec<serde_json::Value>, String> {
     let mut count: usize = 0;
     let module_info_ptr = unsafe { enummodule_native(pid, &mut count) };
 
@@ -1395,7 +1406,7 @@ fn enum_modules(pid: i32) -> Result<(Vec<serde_json::Value>), String> {
 
     unsafe { libc::free(module_info_ptr as *mut libc::c_void) };
 
-    Ok((modules))
+    Ok(modules)
 }
 
 pub async fn enummodule_handler(
@@ -1527,7 +1538,7 @@ fn parse_directory_structure(raw_data: &str) -> Vec<FileItem> {
 
         // Determine if the line represents a directory or file by splitting at the colon
         if let Some((item_type, rest)) = content.split_once(':') {
-            let mut new_item = match item_type {
+            let new_item = match item_type {
                 "dir" => FileItem {
                     item_type: "directory".to_string(),
                     name: rest.to_string(),
@@ -1600,8 +1611,6 @@ pub async fn read_file_handler(req: ReadFileRequest) -> Result<Response<Body>, R
     let decoded_path = percent_decode_str(&req.path)
         .decode_utf8_lossy()
         .into_owned();
-
-    let path = std::path::Path::new(&decoded_path);
 
     let c_path = CString::new(decoded_path.clone()).unwrap();
     let mut size: usize = 0;

@@ -16,14 +16,14 @@ import {
   TableRow,
   TableCell,
   TableCaption,
-} from "./table";
+} from "@/components/common/Table";
 import {
   getByteLengthFromScanType,
   arrayBufferToLittleEndianHexString,
   convertFromLittleEndianHex,
-} from "../../lib/converter";
-import { readProcessMemory } from "../../lib/api";
-import { useStore } from "../global-store";
+} from "@/lib/converter";
+import { readProcessMemory } from "@/lib/api";
+import { useStore } from "@/lib/global-store";
 
 const ScanTable = forwardRef((props, ref) => {
   const {

@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect } from "react";
 import axios from "axios";
-import { useStore } from "./global-store";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useStore } from "@/lib/global-store";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/common/Card";
 import {
   Paper,
   Table,

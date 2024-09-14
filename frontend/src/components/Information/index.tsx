@@ -1,6 +1,6 @@
 import React, { useState } from "react";
-import { useStore } from "./global-store";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useStore } from "@/lib/global-store";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/common/Card";
 import {
   ThemeProvider,
   createTheme,
@@ -10,8 +10,8 @@ import {
   Tab,
   Typography,
 } from "@mui/material";
-import { Modules } from "@/components/modules";
-import { Regions } from "@/components/regions";
+import { Modules } from "./Modules";
+import { Regions } from "./Regions";
 
 const theme = createTheme({
   palette: {

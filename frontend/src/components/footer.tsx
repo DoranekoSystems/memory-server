@@ -1,4 +1,4 @@
-import { TwitterIcon } from "./icon";
+import { TwitterIcon } from "@/components/common/Icon";
 import Link from "next/link";
 export function Footer() {
   return (

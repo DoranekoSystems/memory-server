@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { MountainIcon } from "./icon";
+import { MountainIcon } from "@/components/common/Icon";
 import { useState } from "react";
-import { useStore } from "./global-store";
+import { useStore } from "@/lib/global-store";
 export function Header({ changePage }): any {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const targetOS = useStore((state) => state.targetOS);
@@ -52,16 +52,12 @@ export function Header({ changePage }): any {
         >
           Information
         </button>
-        {targetOS == "ios" ? (
-          <button
-            className="text-sm font-medium hover:underline underline-offset-4"
-            onClick={() => changePage("fileexplorer")}
-          >
-            File Explorer
-          </button>
-        ) : (
-          <></>
-        )}
+        <button
+          className="text-sm font-medium hover:underline underline-offset-4"
+          onClick={() => changePage("fileexplorer")}
+        >
+          File Explorer
+        </button>
       </nav>
       <button
         className="ml-auto sm:hidden focus:outline-none"

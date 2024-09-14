@@ -1,13 +1,14 @@
 use include_dir::{include_dir, Dir};
-use log::info;
+use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
 use warp::http::Response;
 use warp::path::Tail;
 use warp::Filter;
 
 use crate::api;
+use crate::logger;
 
-pub async fn serve(mode: i32) {
+pub async fn serve(mode: i32, host: IpAddr, port: u16) {
     let pid_state = Arc::new(Mutex::new(None));
 
     let cors = warp::cors()
@@ -19,11 +20,11 @@ pub async fn serve(mode: i32) {
         .map(|tail: Tail| tail.as_str().to_string())
         .and_then(serve_static);
 
-    let enumprocess = warp::path!("enumprocess")
+    let enum_process = warp::path!("enumprocess")
         .and(warp::get())
         .and_then(api::enumerate_process_handler);
 
-    let enummodule = warp::path!("enummodule")
+    let enum_module = warp::path!("enummodule")
         .and(warp::get())
         .and(api::with_state(pid_state.clone()))
         .and_then(|pid_state| async move { api::enummodule_handler(pid_state).await });
@@ -77,12 +78,12 @@ pub async fn serve(mode: i32) {
             api::memory_filter_handler(pid_state, filter_request).await
         });
 
-    let enumregions = warp::path!("enumregions")
+    let enum_regions = warp::path!("enumregions")
         .and(warp::get())
         .and(api::with_state(pid_state.clone()))
         .and_then(|pid_state| async move { api::enumerate_regions_handler(pid_state).await });
 
-    let resolveaddr = warp::path!("resolveaddr")
+    let resolve_addr = warp::path!("resolveaddr")
         .and(warp::get())
         .and(warp::query::<api::ResolveAddrRequest>())
         .and(api::with_state(pid_state.clone()))
@@ -119,19 +120,20 @@ pub async fn serve(mode: i32) {
         .or(write_memory)
         .or(memory_scan)
         .or(memory_filter)
-        .or(enumregions)
-        .or(enumprocess)
-        .or(enummodule)
-        .or(resolveaddr)
+        .or(enum_regions)
+        .or(enum_process)
+        .or(enum_module)
+        .or(resolve_addr)
         .or(explore_directory)
         .or(read_file)
         .or(get_app_info)
         .or(server_info)
         .or(static_files)
-        .with(cors);
+        .with(cors)
+        .with(warp::log::custom(logger::http_log));
 
     api::native_api_init(mode);
-    warp::serve(routes).run(([0, 0, 0, 0], 3030)).await;
+    warp::serve(routes).run((host, port)).await;
 }
 
 static STATIC_DIR: Dir = include_dir!("../frontend/out");

@@ -1,5 +1,3 @@
-#![feature(default_alloc_error_handler)]
-
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::backtrace::Backtrace;
 use std::panic;

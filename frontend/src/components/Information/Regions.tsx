@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
-import { useStore } from "./global-store";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useStore } from "@/lib/global-store";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/common/Card";
 import {
   Paper,
   Table,
@@ -67,8 +67,9 @@ const StyledTableCell = styled(TableCell)(({ theme }) => ({
     color: theme.palette.common.white,
   },
   [`&.${tableCellClasses.body}`]: {
-    fontSize: 14,
-    padding: "4px 16px",
+    fontSize: 13,
+    padding: "6px 16px",
+    fontFamily: "font-mono",
     whiteSpace: "nowrap",
     overflow: "hidden",
     textOverflow: "ellipsis",
@@ -88,10 +89,6 @@ const StyledTableRow = styled(TableRow)(({ theme }) => ({
   height: "32px",
 }));
 
-const MonoCell = styled(StyledTableCell)({
-  fontFamily: "monospace",
-});
-
 const IndexCell = styled(StyledTableCell)({
   textAlign: "center",
 });
@@ -99,13 +96,15 @@ const IndexCell = styled(StyledTableCell)({
 const RegionRow = ({ region, index }) => (
   <StyledTableRow>
     <IndexCell style={{ width: "5%" }}>{index}</IndexCell>
-    <MonoCell style={{ width: "15%" }}>
+    <StyledTableCell style={{ width: "15%" }}>
       0x{region.start_address.toUpperCase()}
-    </MonoCell>
-    <MonoCell style={{ width: "15%" }}>
+    </StyledTableCell>
+    <StyledTableCell style={{ width: "15%" }}>
       0x{region.end_address.toUpperCase()}
-    </MonoCell>
-    <MonoCell style={{ width: "15%" }}>{region.protection}</MonoCell>
+    </StyledTableCell>
+    <StyledTableCell style={{ width: "15%" }}>
+      {region.protection}
+    </StyledTableCell>
     <StyledTableCell style={{ width: "50%" }}>
       {region.file_path || ""}
     </StyledTableCell>

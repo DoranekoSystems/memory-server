@@ -1,33 +1,33 @@
 import axios from "axios";
 import { useState, useEffect, useRef } from "react";
-import { useStore } from "./global-store";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
+import { useStore } from "../../lib/global-store";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/common/Card";
+import { Label } from "@/components/common/Label";
+import { Input } from "@/components/common/Input";
+import { Button } from "@/components/common/Button";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import BookmarkTable from "../components/ui/bookmarktable";
+} from "@/components/common/Select";
+import BookmarkTable from "@/components/Bookmark/BookmarkTable";
 
 import {
   getByteLengthFromScanType,
   arrayBufferToLittleEndianHexString,
   convertFromLittleEndianHex,
   convertToLittleEndianHex,
-} from "../lib/converter";
+} from "@/lib/converter";
 
 import {
   getMemoryRegions,
   readProcessMemory,
   resolveAddress,
-} from "../lib/api";
+} from "@/lib/api";
 
-import { isHexadecimal } from "../lib/utils";
+import { isHexadecimal } from "@/lib/utils";
 
 export function Bookmark({ currentPage }) {
   const [addressRanges, setAddressRanges] = useState<[bigint, bigint][]>([

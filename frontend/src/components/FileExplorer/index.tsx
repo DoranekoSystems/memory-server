@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from "react";
-import { useStore } from "./global-store";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useStore } from "@/lib/global-store";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/common/Card";
 import {
   ThemeProvider,
   createTheme,
@@ -224,16 +224,28 @@ const FileList = ({
   );
 };
 export function FileView() {
-  const [currentPath, setCurrentPath] = useState("/private/var");
-  const [inputPath, setInputPath] = useState("/private/var");
+  const [currentPath, setCurrentPath] = useState("/");
+  const [inputPath, setInputPath] = useState("/");
   const [fileStructure, setFileStructure] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [contextMenu, setContextMenu] = useState(null);
   const [selectedItem, setSelectedItem] = useState(null);
+  const targetOS = useStore((state) => state.targetOS);
   const ipAddress = useStore((state) => state.ipAddress);
 
-  useEffect(() => {}, [ipAddress]);
+  useEffect(() => {
+    if (targetOS == "ios") {
+      setCurrentPath("/private/var");
+      setInputPath("/private/var");
+    } else if (targetOS == "linux") {
+      setCurrentPath("/var");
+      setInputPath("/var");
+    } else if (targetOS == "windows") {
+      setCurrentPath("C://");
+      setInputPath("C://");
+    }
+  }, [targetOS, ipAddress]);
 
   const findItemPath = useCallback((items, targetItem, currentPath = "") => {
     for (const item of items) {

@@ -35,10 +35,10 @@ import {
   getByteLengthFromScanType,
   arrayBufferToLittleEndianHexString,
   convertFromLittleEndianHex,
-} from "../../lib/converter";
-import { isHexadecimal } from "../../lib/utils";
-import { readProcessMemory, resolveAddress } from "../../lib/api";
-import { useStore } from "../global-store";
+} from "@/lib/converter";
+import { isHexadecimal } from "@/lib/utils";
+import { readProcessMemory, resolveAddress } from "@/lib/api";
+import { useStore } from "@/lib/global-store";
 
 const theme = createTheme({
   palette: {

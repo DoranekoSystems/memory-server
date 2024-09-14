@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { CloudIcon, CodeIcon, LockIcon } from "./icon";
-import { Button } from "@/components/ui/button";
+import { CloudIcon, CodeIcon, LockIcon } from "@/components/common/Icon";
+import { Button } from "@/components/common/Button";
 
 export function TopPage({ changePage }) {
   return (

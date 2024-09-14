@@ -1,17 +1,18 @@
 import axios from "axios";
 import { useState, useEffect, useRef } from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { useStore } from "./global-store";
+import { Button } from "@/components/common/Button";
+import { Input } from "@/components/common/Input";
+import { Label } from "@/components/common/Label";
+import { useStore } from "@/lib/global-store";
 import {
   SelectValue,
   SelectTrigger,
   SelectItem,
   SelectContent,
   Select,
-} from "@/components/ui/select";
-import { getMemoryRegions, readProcessMemory } from "../lib/api";
+} from "@/components/common/Select";
+import { getMemoryRegions, readProcessMemory } from "@/lib/api";
+import {PlusIcon,SaveIcon} from "@/components/common/Icon";
 
 export function MemoryView({ currentPage }) {
   const [isMobile, setIsMobile] = useState(false);
@@ -1027,66 +1028,5 @@ export function MemoryView({ currentPage }) {
         </aside>
       </div>
     </div>
-  );
-}
-
-function PlusIcon(props) {
-  return (
-    <svg
-      {...props}
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <line x1="12" y1="5" x2="12" y2="19" />
-      <line x1="5" y1="12" x2="19" y2="12" />
-    </svg>
-  );
-}
-
-function SaveIcon(props) {
-  return (
-    <svg
-      {...props}
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
-      <polyline points="17 21 17 13 7 13 7 21" />
-      <polyline points="7 3 7 8 15 8" />
-    </svg>
-  );
-}
-
-function SearchIcon(props) {
-  return (
-    <svg
-      {...props}
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <circle cx="11" cy="11" r="8" />
-      <path d="m21 21-4.3-4.3" />
-    </svg>
   );
 }

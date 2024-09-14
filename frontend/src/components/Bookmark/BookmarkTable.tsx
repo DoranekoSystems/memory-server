@@ -86,7 +86,7 @@ const StyledTableRow = styled(TableRow)(({ theme }) => ({
   },
 }));
 
-const BookmarkTable = ({ bookMarkLists, setBookmarkLists }) => {
+const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const ipAddress = useStore((state) => state.ipAddress);
@@ -111,6 +111,7 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists }) => {
   }, []);
 
   const updateDisplayedRows = useCallback(async () => {
+    if (!isVisible) return;
     const updatedBookmarks = await Promise.all(
       bookMarkLists.map(async (bookmark, index) => {
         try {
@@ -139,7 +140,14 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists }) => {
     );
     setBookmarkLists(updatedBookmarks);
     setRefreshing(false);
-  }, [bookMarkLists, ipAddress, setBookmarkLists, frozenValues, isRowFrozen]);
+  }, [
+    bookMarkLists,
+    ipAddress,
+    setBookmarkLists,
+    frozenValues,
+    isRowFrozen,
+    isVisible,
+  ]);
 
   const freezeMemory = useCallback(async () => {
     for (const [index, bookmark] of bookMarkLists.entries()) {

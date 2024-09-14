@@ -32,7 +32,7 @@ async fn main() {
         )
         .arg(
             Arg::new("host")
-                .short('h')
+                .short('H')
                 .long("host")
                 .num_args(1)
                 .value_name("HOST")

@@ -23,13 +23,18 @@ export default function Home() {
     fileexplorer: FileView,
   };
 
-  const CurrentPageComponent = pageComponents[currentPage];
-
   return (
     <div className="flex flex-col min-h-screen">
       <Header changePage={setCurrentPage} />
       <main className="flex-grow">
-        <CurrentPageComponent changePage={setCurrentPage} />
+        {Object.entries(pageComponents).map(([key, Component]) => (
+          <div
+            key={key}
+            style={{ display: currentPage === key ? "block" : "none" }}
+          >
+            <Component currentPage={currentPage} changePage={setCurrentPage} />
+          </div>
+        ))}
       </main>
       <Footer />
     </div>

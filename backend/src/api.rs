@@ -10,6 +10,7 @@ use rayon::prelude::*;
 use regex::bytes::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use serde_json::Value;
 use std::collections::HashMap;
 
 use std::env;
@@ -1670,8 +1671,19 @@ pub async fn get_app_info_handler(
             result_str
         };
 
+        let parsed_result: Value = match serde_json::from_str(&result) {
+            Ok(json) => json,
+            Err(e) => {
+                return Ok(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({
+                        "message": format!("Failed to parse application info: {}", e)
+                    })),
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                ));
+            }
+        };
         Ok(warp::reply::with_status(
-            warp::reply::json(&json!({ "info": result })),
+            warp::reply::json(&json!({ "info": parsed_result })),
             StatusCode::OK,
         ))
     } else {

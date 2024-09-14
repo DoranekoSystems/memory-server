@@ -1,6 +1,11 @@
 import React, { useState } from "react";
 import { useStore } from "@/lib/global-store";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/common/Card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/common/Card";
 import {
   ThemeProvider,
   createTheme,

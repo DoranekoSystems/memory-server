@@ -1,7 +1,12 @@
 import React, { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import { useStore } from "@/lib/global-store";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/common/Card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/common/Card";
 import { Label } from "@/components/common/Label";
 import { Input } from "@/components/common/Input";
 import { Button } from "@/components/common/Button";
@@ -23,7 +28,6 @@ import {
 import { getMemoryRegions } from "@/lib/api";
 
 export function Scanner({ currentPage }) {
-  // State
   const [tabs, setTabs] = useState([{ id: "Scan 1", label: "Scan 1" }]);
   const [activeTab, setActiveTab] = useState("Scan 1");
   const [tabStates, setTabStates] = useState({
@@ -58,21 +62,16 @@ export function Scanner({ currentPage }) {
   const [nextScanNumber, setNextScanNumber] = useState(2);
   const [closedNumbers, setClosedNumbers] = useState(new Set());
 
-  // Refs
   const tableRef = useRef(null);
 
-  // Global state
   const ipAddress = useStore((state) => state.ipAddress);
   const serverMode = useStore((state) => state.serverMode);
 
-  // Effects
   useEffect(() => {
     const currentState = getCurrentTabState();
     const protectionString = getProtectionString(currentState.protection);
-    // Use protectionString as needed
   }, [activeTab, tabStates]);
 
-  // Helper functions
   const getCurrentTabState = () => {
     const state = tabStates[activeTab];
     return state;
@@ -614,6 +613,7 @@ export function Scanner({ currentPage }) {
               handleSelect={handleSelect}
               dataType={getCurrentTabState().dataType}
               convertFromLittleEndianHex={convertFromLittleEndianHex}
+              currentPage={currentPage}
             />
           </CardContent>
         </Card>

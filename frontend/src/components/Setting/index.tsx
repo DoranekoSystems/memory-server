@@ -114,7 +114,12 @@ export function Setting() {
   const fetchApplicationInfo = async (ip, pid) => {
     const applicationInfoUrl = `http://${ip}:3030/getappinfo?pid=${pid}`;
     try {
-      const response = await fetch(applicationInfoUrl);
+      const response = await fetch(applicationInfoUrl, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
       const data = await response.json();
 
       // Parse the 'info' field if it is a stringified JSON

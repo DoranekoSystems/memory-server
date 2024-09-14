@@ -36,35 +36,58 @@ std::string escape_json_string(const std::string &input)
     return escaped.str();
 }
 
-const char *explore_directory(const char *path, int maxDepth)
+std::string normalize_path(const std::string &path)
 {
+    std::string normalized = path;
+    std::replace(normalized.begin(), normalized.end(), '/', '\\');
+    if (normalized.back() == '\\')
+    {
+        normalized.pop_back();
+    }
+    return normalized;
+}
+
+const char *explore_directory_recursive(const char *path, int maxDepth, int currentDepth = 0)
+{
+    if (maxDepth < 0 || currentDepth > maxDepth)
+    {
+        return strdup("");
+    }
+
+    std::string normalizedPath = normalize_path(path);
+    std::string searchPath = normalizedPath + "\\*";
+
     WIN32_FIND_DATA findFileData;
-    HANDLE hFind = FindFirstFile((std::string(path) + "\\*").c_str(), &findFileData);
+    HANDLE hFind = FindFirstFile(searchPath.c_str(), &findFileData);
 
     if (hFind == INVALID_HANDLE_VALUE)
     {
         std::ostringstream error;
-        error << "Error: Failed to open directory " << path;
-        debug_log(LOG_ERROR,"Failed to open directory %s. Error code: %lu", path, GetLastError());
+        error << "Error: Failed to open directory " << normalizedPath;
+        debug_log(LOG_ERROR, "Failed to open directory %s. Error code: %lu", normalizedPath.c_str(),
+                  GetLastError());
         return strdup(error.str().c_str());
     }
 
     std::ostringstream result;
-    int depth = 0;
+    std::string indent(currentDepth * 2, ' ');
 
     do
     {
         const std::string itemName = findFileData.cFileName;
         if (itemName == "." || itemName == "..") continue;
 
-        std::string fullPath = std::string(path) + "\\" + itemName;
+        std::string fullPath = normalizedPath + "\\" + itemName;
 
         if (findFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
         {
-            result << std::string(depth * 2, ' ') << "dir: " << itemName << "\n";
-            if (depth < maxDepth)
+            result << indent << "dir:" << itemName << "\n";
+            if (currentDepth < maxDepth)
             {
-                result << explore_directory(fullPath.c_str(), maxDepth - 1);
+                const char *subDirContent =
+                    explore_directory_recursive(fullPath.c_str(), maxDepth, currentDepth + 1);
+                result << subDirContent;
+                free((void *)subDirContent);
             }
         }
         else
@@ -72,13 +95,25 @@ const char *explore_directory(const char *path, int maxDepth)
             LARGE_INTEGER fileSize;
             fileSize.LowPart = findFileData.nFileSizeLow;
             fileSize.HighPart = findFileData.nFileSizeHigh;
-            result << std::string(depth * 2, ' ') << "file: " << itemName << ","
-                   << fileSize.QuadPart << "\n";
+
+            FILETIME lastWriteTime = findFileData.ftLastWriteTime;
+            ULARGE_INTEGER uli;
+            uli.LowPart = lastWriteTime.dwLowDateTime;
+            uli.HighPart = lastWriteTime.dwHighDateTime;
+            long long timestamp = (uli.QuadPart / 10000000ULL) - 11644473600ULL;
+
+            result << indent << "file:" << itemName << "," << fileSize.QuadPart << "," << timestamp
+                   << "\n";
         }
     } while (FindNextFile(hFind, &findFileData) != 0);
 
     FindClose(hFind);
     return strdup(result.str().c_str());
+}
+
+const char *explore_directory(const char *path, int maxDepth)
+{
+    return explore_directory_recursive(path, maxDepth);
 }
 
 const void *read_file(const char *path, size_t *size, char **error_message)
@@ -90,7 +125,7 @@ const void *read_file(const char *path, size_t *size, char **error_message)
         std::ostringstream error;
         error << "Error: Could not open file " << path;
         *error_message = strdup(error.str().c_str());
-        debug_log(LOG_ERROR,"Failed to open file %s. Error code: %lu", path, GetLastError());
+        debug_log(LOG_ERROR, "Failed to open file %s. Error code: %lu", path, GetLastError());
         *size = 0;
         return NULL;
     }
@@ -101,7 +136,7 @@ const void *read_file(const char *path, size_t *size, char **error_message)
         std::ostringstream error;
         error << "Error: Could not get file size for " << path;
         *error_message = strdup(error.str().c_str());
-        debug_log(LOG_ERROR,"Failed to get file size for file %s. Error code: %lu", path,
+        debug_log(LOG_ERROR, "Failed to get file size for file %s. Error code: %lu", path,
                   GetLastError());
         CloseHandle(hFile);
         *size = 0;
@@ -115,7 +150,7 @@ const void *read_file(const char *path, size_t *size, char **error_message)
         std::ostringstream error;
         error << "Error: Could not read file " << path;
         *error_message = strdup(error.str().c_str());
-        debug_log(LOG_ERROR,"Failed to read file %s. Error code: %lu", path, GetLastError());
+        debug_log(LOG_ERROR, "Failed to read file %s. Error code: %lu", path, GetLastError());
         CloseHandle(hFile);
         *size = 0;
         return NULL;
@@ -135,7 +170,7 @@ const char *get_application_info(DWORD pid)
     {
         std::ostringstream error;
         error << "{\"error\":\"Failed to open process " << pid << "\"}";
-        debug_log(LOG_ERROR,"Failed to open process %d for reading. Error code: %lu", pid,
+        debug_log(LOG_ERROR, "Failed to open process %d for reading. Error code: %lu", pid,
                   GetLastError());
         return strdup(error.str().c_str());
     }
@@ -145,7 +180,7 @@ const char *get_application_info(DWORD pid)
     {
         std::ostringstream error;
         error << "{\"error\":\"Could not retrieve process path for PID " << pid << "\"}";
-        debug_log(LOG_ERROR,"Failed to retrieve process path for PID %d. Error code: %lu", pid,
+        debug_log(LOG_ERROR, "Failed to retrieve process path for PID %d. Error code: %lu", pid,
                   GetLastError());
         CloseHandle(hProcess);
         return strdup(error.str().c_str());
@@ -156,7 +191,7 @@ const char *get_application_info(DWORD pid)
     {
         std::ostringstream error;
         error << "{\"error\":\"Could not retrieve AppData path\"}";
-        debug_log(LOG_ERROR,"Failed to retrieve AppData path. Error code: %lu", GetLastError());
+        debug_log(LOG_ERROR, "Failed to retrieve AppData path. Error code: %lu", GetLastError());
         CloseHandle(hProcess);
         return strdup(error.str().c_str());
     }
@@ -165,7 +200,7 @@ const char *get_application_info(DWORD pid)
 
     std::ostringstream json;
     json << "{"
-         << "\"BinaryPath\":\"" << escape_json_string(processPath) << "}";
+         << "\"BinaryPath\":\"" << escape_json_string(processPath) << "\"}";
 
     return strdup(json.str().c_str());
 }

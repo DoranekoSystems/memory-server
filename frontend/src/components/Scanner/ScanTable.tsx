@@ -32,7 +32,13 @@ const ScanTable = forwardRef((props, ref) => {
     handleSelect,
     dataType,
     setScanResults,
+    currentPage,
   } = props;
+  const [isVisible, setIsVisible] = useState(currentPage === "scanner");
+
+  useEffect(() => {
+    setIsVisible(currentPage === "scanner");
+  }, [currentPage]);
 
   const [visibleRange, setVisibleRange] = useState({
     startIndex: 0,
@@ -111,6 +117,7 @@ const ScanTable = forwardRef((props, ref) => {
   };
 
   useEffect(() => {
+    if (!isVisible) return;
     const handleResize = () => {
       setIsMobile(window.innerWidth <= 640);
     };
@@ -160,7 +167,14 @@ const ScanTable = forwardRef((props, ref) => {
       clearInterval(interval);
       window.removeEventListener("resize", handleResize);
     };
-  }, [ipAddress, dataType, visibleRange, scanResults, setScanResults]);
+  }, [
+    ipAddress,
+    dataType,
+    visibleRange,
+    scanResults,
+    setScanResults,
+    isVisible,
+  ]);
 
   return (
     <div ref={ref} className="w-full h-96">

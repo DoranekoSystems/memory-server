@@ -11,8 +11,14 @@ import {
   SelectContent,
   Select,
 } from "@/components/common/Select";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/common/Card";
 import { getMemoryRegions, readProcessMemory } from "@/lib/api";
-import {PlusIcon,SaveIcon} from "@/components/common/Icon";
+import { PlusIcon, SaveIcon } from "@/components/common/Icon";
 
 export function MemoryView({ currentPage }) {
   const [isMobile, setIsMobile] = useState(false);
@@ -32,6 +38,11 @@ export function MemoryView({ currentPage }) {
   });
   const [cellPosition, setCellPosition] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isVisible, setIsVisible] = useState(currentPage === "memoryview");
+
+  useEffect(() => {
+    setIsVisible(currentPage === "memoryview");
+  }, [currentPage]);
 
   function intToString(value, dataType) {
     const buffer = new ArrayBuffer(8);
@@ -171,6 +182,7 @@ export function MemoryView({ currentPage }) {
       intervalIds = regions.map((region) => {
         if (region.address) {
           return setInterval(async () => {
+            if (!isVisible) return;
             const data = await readProcessMemory(
               ipAddress,
               parseInt(region.address, 16),
@@ -200,7 +212,7 @@ export function MemoryView({ currentPage }) {
         }
       });
     };
-  }, [ipAddress, regions]);
+  }, [ipAddress, regions, isVisible]);
 
   useEffect(() => {
     const handleKeyDown = async (event) => {
@@ -467,11 +479,11 @@ export function MemoryView({ currentPage }) {
             const color =
               prevByte !== null && prevByte !== byte && !isAddressChanged
                 ? "text-red-500"
-                : "text-white";
+                : "text-gray-800";
             const background =
               selectedCell.regionId === region.id &&
               selectedCell.index === i + index
-                ? "bg-blue-500"
+                ? "bg-blue-200"
                 : "";
             return (
               <span
@@ -510,11 +522,11 @@ export function MemoryView({ currentPage }) {
               const color =
                 prevWord !== null && prevWord !== word && !isAddressChanged
                   ? "text-red-500"
-                  : "text-white";
+                  : "text-gray-800";
               const background =
                 selectedCell.regionId === region.id &&
                 selectedCell.index * adjust === i + index * adjust
-                  ? "bg-blue-500"
+                  ? "bg-blue-200"
                   : "";
               return (
                 <span
@@ -554,11 +566,11 @@ export function MemoryView({ currentPage }) {
               const color =
                 prevDword !== null && prevDword !== dword && !isAddressChanged
                   ? "text-red-500"
-                  : "text-white";
+                  : "text-gray-800";
               const background =
                 selectedCell.regionId === region.id &&
                 selectedCell.index * adjust === i + index * adjust
-                  ? "bg-blue-500"
+                  ? "bg-blue-200"
                   : "";
               return (
                 <span
@@ -600,11 +612,11 @@ export function MemoryView({ currentPage }) {
               const color =
                 prevQword !== null && prevQword !== qword && !isAddressChanged
                   ? "text-red-500"
-                  : "text-white";
+                  : "text-gray-800";
               const background =
                 selectedCell.regionId === region.id &&
                 selectedCell.index * adjust === i + index * adjust
-                  ? "bg-blue-500"
+                  ? "bg-blue-200"
                   : "";
               return (
                 <span
@@ -646,11 +658,11 @@ export function MemoryView({ currentPage }) {
                 const color =
                   prevFloat !== null && prevFloat !== float && !isAddressChanged
                     ? "text-red-500"
-                    : "text-white";
+                    : "text-gray-800";
                 const background =
                   selectedCell.regionId === region.id &&
                   selectedCell.index * adjust === i + index * adjust
-                    ? "bg-blue-500"
+                    ? "bg-blue-200"
                     : "";
                 return (
                   <span
@@ -684,11 +696,11 @@ export function MemoryView({ currentPage }) {
                   prevDouble !== double &&
                   !isAddressChanged
                     ? "text-red-500"
-                    : "text-white";
+                    : "text-gray-800";
                 const background =
                   selectedCell.regionId === region.id &&
                   selectedCell.index * adjust === i + index * adjust
-                    ? "bg-blue-500"
+                    ? "bg-blue-200"
                     : "";
                 return (
                   <span
@@ -713,11 +725,11 @@ export function MemoryView({ currentPage }) {
             const color =
               prevByte !== null && prevByte !== byte && !isAddressChanged
                 ? "text-red-500"
-                : "text-white";
+                : "text-gray-800";
             const background =
               selectedCell.regionId === region.id &&
               selectedCell.index === i + index
-                ? "bg-blue-500"
+                ? "bg-blue-200"
                 : "";
             return (
               <span
@@ -749,11 +761,11 @@ export function MemoryView({ currentPage }) {
           const color =
             prevByte !== null && prevByte !== byte && !isAddressChanged
               ? "text-red-500"
-              : "text-white";
+              : "text-gray-800";
           const background =
             selectedCell.regionId === region.id &&
             selectedCell.index === Math.floor((i + index) / adjust)
-              ? "bg-blue-500"
+              ? "bg-blue-200"
               : "";
           return (
             <span
@@ -777,7 +789,7 @@ export function MemoryView({ currentPage }) {
             const color =
               prevWord !== null && prevWord !== word && !isAddressChanged
                 ? "text-red-500"
-                : "text-white";
+                : "text-gray-800";
             const background =
               selectedCell.regionId === region.id &&
               (region.dataType === "uint8" || region.dataType === "int8"
@@ -785,7 +797,7 @@ export function MemoryView({ currentPage }) {
                   Math.floor((i + index * 2) / 2)
                 : Math.floor((selectedCell.index / adjust) * adjust) ===
                   Math.floor((i + index * 2) / adjust))
-                ? "bg-blue-500"
+                ? "bg-blue-200"
                 : "";
             return (
               <span
@@ -891,142 +903,151 @@ export function MemoryView({ currentPage }) {
   };
 
   return (
-    <div className="dark min-h-screen flex flex-col bg-gray-900 text-gray-200">
-      <header className="flex flex-col sm:flex-row items-center justify-between px-4 py-2 border-b border-gray-700">
-        <div className="flex gap-4 mb-2 sm:mb-0">
-          <Button size="sm" variant="ghost" onClick={addRegion}>
-            <PlusIcon className="w-5 h-5" /> Add Region
-          </Button>
-          <Button size="sm" variant="ghost">
-            <SaveIcon className="w-5 h-5" /> Save
-          </Button>
-        </div>
-        <div className="flex flex-row items-center w-full sm:w-auto mt-2 sm:mt-0">
-          <Input
-            className="pl-10 bg-gray-800 border-gray-700 flex-1 mr-2"
-            placeholder="Memory Address (Hex)"
-            value={inputAddress}
-            onChange={(e) => setInputAddress(e.target.value)}
-          />
-          <Button className="mt-2 sm:mt-0 sm:ml-2" onClick={handleGoClick}>
-            Go
-          </Button>
-        </div>
-      </header>
-      <div className="flex flex-col sm:flex-row flex-1 overflow-hidden">
-        <main className="flex-1 overflow-auto p-4">
-          {regions.map((region) => (
-            <div
-              key={region.id}
-              className={`inline-block p-2 resize-container draggableregion region ${
-                region.id === selectedRegion ? "selected" : ""
-              } ${isDragging && region.id !== isDraggingId ? "inactive" : ""}`}
-              ref={(ref) => {
-                scrollableRefs.current[region.id] = ref;
-              }}
-              onMouseDown={(event) => handleMouseDown(event, region.id)}
-              onMouseMove={(event) => handleMouseMove(event, region.id)}
-              onMouseUp={handleMouseUp}
-              onMouseLeave={handleMouseUp}
-            >
-              <div className={`memory-data ${isDragging ? "inactive" : ""}`}>
-                {renderMemoryData(region)}
-              </div>
-              <div className="flex justify-start">
-                <button
-                  className="m-3 px-1 py-1 bg-red-800 text-white text-sm rounded hover:bg-red-900 focus:outline-none"
-                  onClick={() => handleCloseRegion(region.id)}
-                >
-                  Close
-                </button>
-              </div>
+    <div className="flex flex-col items-center flex-grow mt-8 px-4">
+      <Card className="w-full max-w-7xl mb-6">
+        <CardHeader>
+          <CardTitle className="text-2xl mb-1">Memory View</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col sm:flex-row justify-between mb-4">
+            <div className="flex gap-4 mb-2 sm:mb-0">
+              <Button size="sm" variant="outline" onClick={addRegion}>
+                <PlusIcon className="w-5 h-5" /> Add Region
+              </Button>
             </div>
-          ))}
-        </main>
-        <aside className="sm:w-64 border-t sm:border-t-0 sm:border-l border-gray-700 p-4">
-          <h2 className="text-lg font-semibold mt-4 mb-2">Settings</h2>
-
-          <div>
-            <Label className="font-medium mt-4" htmlFor="displayType">
-              Display Type
-            </Label>
-            <Select
-              className="mt-1"
-              id="displayType"
-              value={getSelectedRegion()?.displayType}
-              onValueChange={(value) => {
-                updateSelectedRegion({ displayType: value });
-                setSelectedRegion(selectedRegion);
-              }}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select a display type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="hex">Hexadecimal(Editable)</SelectItem>
-                <SelectItem value="dec">Decimal</SelectItem>
-              </SelectContent>
-            </Select>
-            <Label className="font-medium" htmlFor="theme">
-              Encoding
-            </Label>
-            <Select
-              className="mt-1"
-              id="encoding"
-              value={getSelectedRegion()?.encoding}
-              onValueChange={(value) => {
-                updateSelectedRegion({ encoding: value });
-                setSelectedRegion(selectedRegion);
-              }}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="utf-8">UTF-8</SelectItem>
-                <SelectItem value="utf-16">UTF-16</SelectItem>
-              </SelectContent>
-            </Select>
-            <Label className="font-medium" htmlFor="theme">
-              Data Type
-            </Label>
-            <Select
-              className="mt-1"
-              id="dataType"
-              value={getSelectedRegion()?.dataType}
-              onValueChange={(value) => {
-                updateSelectedRegion({ dataType: value });
-                setSelectedRegion(selectedRegion);
-              }}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select" />
-              </SelectTrigger>
-              {getSelectedRegion()?.displayType === "hex" ? (
-                <SelectContent>
-                  <SelectItem value="uint8">BYTE</SelectItem>
-                  <SelectItem value="uint16">WORD</SelectItem>
-                  <SelectItem value="uint32">DWORD</SelectItem>
-                  <SelectItem value="uint64">QWORD</SelectItem>
-                </SelectContent>
-              ) : (
-                <SelectContent>
-                  <SelectItem value="int8">Int8</SelectItem>
-                  <SelectItem value="int16">Int16</SelectItem>
-                  <SelectItem value="int32">Int32</SelectItem>
-                  <SelectItem value="int64">Int64</SelectItem>
-                  <SelectItem value="uint8">UInt8</SelectItem>
-                  <SelectItem value="uint16">UInt16</SelectItem>
-                  <SelectItem value="uint32">UInt32</SelectItem>
-                  <SelectItem value="uint64">UInt64</SelectItem>
-                  <SelectItem value="float">Float</SelectItem>
-                  <SelectItem value="double">Double</SelectItem>
-                </SelectContent>
-              )}
-            </Select>
+            <div className="flex flex-row items-center w-full sm:w-auto mt-2 sm:mt-0">
+              <Input
+                className="pl-10 bg-white border-gray-300 flex-1 mr-2"
+                placeholder="Memory Address (Hex)"
+                value={inputAddress}
+                onChange={(e) => setInputAddress(e.target.value)}
+              />
+              <Button onClick={handleGoClick}>Go</Button>
+            </div>
           </div>
-        </aside>
-      </div>
+
+          <div className="flex flex-col sm:flex-row">
+            <main className="flex-1 overflow-auto">
+              {regions.map((region) => (
+                <div
+                  key={region.id}
+                  className={`inline-block p-2 resize-container draggableregion region ${
+                    region.id === selectedRegion ? "selected" : ""
+                  } ${
+                    isDragging && region.id !== isDraggingId ? "inactive" : ""
+                  }`}
+                  ref={(ref) => {
+                    scrollableRefs.current[region.id] = ref;
+                  }}
+                  onMouseDown={(event) => handleMouseDown(event, region.id)}
+                  onMouseMove={(event) => handleMouseMove(event, region.id)}
+                  onMouseUp={handleMouseUp}
+                  onMouseLeave={handleMouseUp}
+                >
+                  <div
+                    className={`memory-data ${
+                      isDragging ? "inactive" : ""
+                    } bg-gray-100 p-2 rounded`}
+                  >
+                    {renderMemoryData(region)}
+                  </div>
+                  <div className="flex justify-start">
+                    <button
+                      className="m-3 px-1 py-1 bg-red-500 text-white text-sm rounded hover:bg-red-600 focus:outline-none"
+                      onClick={() => handleCloseRegion(region.id)}
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </main>
+            <aside className="sm:w-64 border-t sm:border-t-0 sm:border-l border-gray-200 p-4">
+              <h2 className="text-lg font-semibold mb-2">Settings</h2>
+
+              <div>
+                <Label className="font-medium mt-4" htmlFor="displayType">
+                  Display Type
+                </Label>
+                <Select
+                  className="mt-1"
+                  id="displayType"
+                  value={getSelectedRegion()?.displayType}
+                  onValueChange={(value) => {
+                    updateSelectedRegion({ displayType: value });
+                    setSelectedRegion(selectedRegion);
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select a display type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="hex">Hexadecimal(Editable)</SelectItem>
+                    <SelectItem value="dec">Decimal</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Label className="font-medium mt-4" htmlFor="encoding">
+                  Encoding
+                </Label>
+                <Select
+                  className="mt-1"
+                  id="encoding"
+                  value={getSelectedRegion()?.encoding}
+                  onValueChange={(value) => {
+                    updateSelectedRegion({ encoding: value });
+                    setSelectedRegion(selectedRegion);
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="utf-8">UTF-8</SelectItem>
+                    <SelectItem value="utf-16">UTF-16</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Label className="font-medium mt-4" htmlFor="dataType">
+                  Data Type
+                </Label>
+                <Select
+                  className="mt-1"
+                  id="dataType"
+                  value={getSelectedRegion()?.dataType}
+                  onValueChange={(value) => {
+                    updateSelectedRegion({ dataType: value });
+                    setSelectedRegion(selectedRegion);
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select" />
+                  </SelectTrigger>
+                  {getSelectedRegion()?.displayType === "hex" ? (
+                    <SelectContent>
+                      <SelectItem value="uint8">BYTE</SelectItem>
+                      <SelectItem value="uint16">WORD</SelectItem>
+                      <SelectItem value="uint32">DWORD</SelectItem>
+                      <SelectItem value="uint64">QWORD</SelectItem>
+                    </SelectContent>
+                  ) : (
+                    <SelectContent>
+                      <SelectItem value="int8">Int8</SelectItem>
+                      <SelectItem value="int16">Int16</SelectItem>
+                      <SelectItem value="int32">Int32</SelectItem>
+                      <SelectItem value="int64">Int64</SelectItem>
+                      <SelectItem value="uint8">UInt8</SelectItem>
+                      <SelectItem value="uint16">UInt16</SelectItem>
+                      <SelectItem value="uint32">UInt32</SelectItem>
+                      <SelectItem value="uint64">UInt64</SelectItem>
+                      <SelectItem value="float">Float</SelectItem>
+                      <SelectItem value="double">Double</SelectItem>
+                    </SelectContent>
+                  )}
+                </Select>
+              </div>
+            </aside>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

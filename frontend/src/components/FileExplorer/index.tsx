@@ -1,6 +1,11 @@
 import React, { useState, useCallback, useEffect } from "react";
 import { useStore } from "@/lib/global-store";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/common/Card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/common/Card";
 import {
   ThemeProvider,
   createTheme,
@@ -247,30 +252,67 @@ export function FileView() {
     }
   }, [targetOS, ipAddress]);
 
-  const findItemPath = useCallback((items, targetItem, currentPath = "") => {
-    for (const item of items) {
-      const itemPath = path.join(currentPath, item.name);
-      if (item === targetItem) {
-        return itemPath;
-      }
-      if (item.item_type === "directory" && item.children) {
-        const foundPath = findItemPath(item.children, targetItem, itemPath);
-        if (foundPath) return foundPath;
-      }
-    }
-    return null;
-  }, []);
+  const normalizeWindowsPath = (inputPath) => {
+    let normalizedPath = inputPath.replace(/\//g, "\\");
+    normalizedPath = normalizedPath.replace(/\\+/g, "\\");
+    normalizedPath = normalizedPath.replace(/^([A-Za-z]:)(\\?.*)$/, "$1\\$2");
+    return normalizedPath;
+  };
 
-  const updateFileStructure = useCallback((data, basePath) => {
-    return data.map((item) => ({
-      ...item,
-      fullPath: path.join(basePath, item.name),
-      children: item.item_type === "directory" ? [] : undefined,
-    }));
-  }, []);
+  const windowsPathJoin = (...parts) => {
+    const normalizedParts = parts.map((part) => normalizeWindowsPath(part));
+    return normalizedParts.join("\\");
+  };
+
+  const splitWindowsPath = (path) => {
+    const normalizedPath = normalizeWindowsPath(path);
+    const parts = normalizedPath.split("\\");
+    if (parts[0].endsWith(":")) {
+      parts[0] = parts[0];
+    }
+    return parts.filter(Boolean);
+  };
+
+  const findItemPath = useCallback(
+    (items, targetItem, currentPath = "") => {
+      for (const item of items) {
+        const itemPath =
+          targetOS === "windows"
+            ? windowsPathJoin(currentPath, item.name)
+            : path.posix.join(currentPath, item.name);
+        if (item === targetItem) {
+          return itemPath;
+        }
+        if (item.item_type === "directory" && item.children) {
+          const foundPath = findItemPath(item.children, targetItem, itemPath);
+          if (foundPath) return foundPath;
+        }
+      }
+      return null;
+    },
+    [targetOS]
+  );
+
+  const updateFileStructure = useCallback(
+    (data, basePath) => {
+      return data.map((item) => ({
+        ...item,
+        fullPath:
+          targetOS === "windows"
+            ? windowsPathJoin(basePath, item.name)
+            : path.posix.join(basePath, item.name),
+        children: item.item_type === "directory" ? [] : undefined,
+      }));
+    },
+    [targetOS]
+  );
 
   const fetchDirectoryContents = async (directoryPath) => {
-    const encodedPath = encodeURIComponent(directoryPath);
+    let normalizedPath =
+      targetOS === "windows"
+        ? normalizeWindowsPath(directoryPath)
+        : directoryPath;
+    const encodedPath = encodeURIComponent(normalizedPath);
     const response = await axios.get(
       `http://${ipAddress}:3030/exploredirectory?path=${encodedPath}&max_depth=1`
     );
@@ -291,9 +333,13 @@ export function FileView() {
   };
 
   const handleSubmit = async () => {
-    let result = await loadDirectory(inputPath);
+    let pathToLoad = inputPath;
+    if (targetOS === "windows") {
+      pathToLoad = normalizeWindowsPath(inputPath);
+    }
+    let result = await loadDirectory(pathToLoad);
     if (result) {
-      setCurrentPath(inputPath);
+      setCurrentPath(pathToLoad);
     }
   };
 
@@ -425,22 +471,40 @@ export function FileView() {
   );
 
   const renderBreadcrumbs = () => {
-    const pathParts = currentPath.split("/").filter(Boolean);
+    const pathParts =
+      targetOS === "windows"
+        ? splitWindowsPath(currentPath)
+        : currentPath.split("/").filter(Boolean);
 
     return (
       <Breadcrumbs aria-label="breadcrumb">
-        <Link
-          color="inherit"
-          href="#"
-          onClick={() => handleBreadcrumbClick("/")}
-          style={{ display: "flex", alignItems: "center" }}
-        >
-          <HomeIcon sx={{ mr: 0.5 }} fontSize="inherit" />
-          Root
-        </Link>
-        {pathParts.map((part, index) => {
-          const fullPath = "/" + pathParts.slice(0, index + 1).join("/");
-          const isLast = index === pathParts.length - 1;
+        {targetOS === "windows" ? (
+          <Link
+            color="inherit"
+            href="#"
+            onClick={() => handleBreadcrumbClick(pathParts[0])}
+            style={{ display: "flex", alignItems: "center" }}
+          >
+            <HomeIcon sx={{ mr: 0.5 }} fontSize="inherit" />
+            {pathParts[0]}
+          </Link>
+        ) : (
+          <Link
+            color="inherit"
+            href="#"
+            onClick={() => handleBreadcrumbClick("/")}
+            style={{ display: "flex", alignItems: "center" }}
+          >
+            <HomeIcon sx={{ mr: 0.5 }} fontSize="inherit" />
+            Root
+          </Link>
+        )}
+        {pathParts.slice(1).map((part, index) => {
+          const fullPath =
+            targetOS === "windows"
+              ? windowsPathJoin(...pathParts.slice(0, index + 2))
+              : "/" + pathParts.slice(0, index + 2).join("/");
+          const isLast = index === pathParts.length - 2;
 
           return isLast ? (
             <Typography key={fullPath} color="text.primary">

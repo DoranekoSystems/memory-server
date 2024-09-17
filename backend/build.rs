@@ -67,6 +67,7 @@ fn main() {
             println!("cargo:rustc-link-lib=static=c++");
             build.flag_if_supported("-DTARGET_IS_ANDROID");
             build.file("src/cpp/src/linux/native_api.cpp");
+            build.file("src/cpp/src/linux/file_api.cpp");
         }
 
         "linux" => {

@@ -5,12 +5,12 @@ import {
   CardContent,
   CardFooter,
   Card,
-} from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
+} from "@/components/common/Card";
+import { Label } from "@/components/common/Label";
+import { Input } from "@/components/common/Input";
+import { Button } from "@/components/common/Button";
 import { useState, useEffect, useRef } from "react";
-import { useStore } from "./global-store";
+import { useStore } from "@/lib/global-store";
 
 const InfoItem = ({ label, value }) => (
   <div className="mb-4 last:mb-0">
@@ -114,7 +114,12 @@ export function Setting() {
   const fetchApplicationInfo = async (ip, pid) => {
     const applicationInfoUrl = `http://${ip}:3030/getappinfo?pid=${pid}`;
     try {
-      const response = await fetch(applicationInfoUrl);
+      const response = await fetch(applicationInfoUrl, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
       const data = await response.json();
 
       // Parse the 'info' field if it is a stringified JSON

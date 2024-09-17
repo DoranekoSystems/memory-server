@@ -9,6 +9,21 @@
 #include <string>
 #include <vector>
 
+enum LogLevel
+{
+    LOG_TRACE,
+    LOG_DEBUG,
+    LOG_INFO,
+    LOG_WARN,
+    LOG_ERROR
+};
+
+enum ServerMode
+{
+    NORMAL,
+    EMBEDDED,
+};
+
 typedef struct
 {
     int pid;
@@ -22,6 +37,13 @@ typedef struct
     bool is_64bit;
     char *modulename;
 } ModuleInfo;
+
+typedef struct
+{
+    int mode;
+} ServerState;
+
+ServerState global_server_state;
 
 typedef int (*PROC_REGIONFILENAME)(int pid, uint64_t address, void *buffer, uint32_t buffersize);
 extern PROC_REGIONFILENAME proc_regionfilename;
@@ -61,6 +83,7 @@ extern "C" bool resume_process(pid_t pid);
 
 extern "C" ModuleInfo *enummodule_native(pid_t pid, size_t *count);
 
-extern "C" int debug_log(const char *format, ...);
+extern "C" void native_log(int level, const char *message);
+int debug_log(LogLevel level, const char *format, ...);
 
 #endif

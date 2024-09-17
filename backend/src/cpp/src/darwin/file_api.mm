@@ -114,37 +114,37 @@
     NSMutableDictionary *info = [NSMutableDictionary dictionary];
 
     pid_t currentPid = getpid();
-    debug_log("Current PID: %d, Target PID: %d", currentPid, pid);
+    debug_log(LOG_DEBUG, "Current PID: %d, Target PID: %d", currentPid, pid);
 
     if (pid == currentPid)
     {
-        debug_log("Fetching info for current process.");
+        // debug_log("Fetching info for current process.");
 
         NSString *bundlePath = [[NSBundle mainBundle] bundlePath];
         info[@"BundlePath"] = bundlePath;
-        debug_log("Bundle path: %s", [bundlePath UTF8String]);
+        debug_log(LOG_DEBUG, "Bundle path: %s", [bundlePath UTF8String]);
 
         NSArray *documentPaths =
             NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
         NSString *documentDirectory = [documentPaths firstObject];
         info[@"DocumentDirectory"] = documentDirectory;
-        debug_log("Document directory: %s", [documentDirectory UTF8String]);
+        debug_log(LOG_DEBUG, "Document directory: %s", [documentDirectory UTF8String]);
 
         NSArray *libraryPaths =
             NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
         NSString *libraryDirectory = [libraryPaths firstObject];
         info[@"LibraryDirectory"] = libraryDirectory;
-        debug_log("Library directory: %s", [libraryDirectory UTF8String]);
+        debug_log(LOG_DEBUG, "Library directory: %s", [libraryDirectory UTF8String]);
 
         NSArray *cachesPaths =
             NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
         NSString *cachesDirectory = [cachesPaths firstObject];
         info[@"CachesDirectory"] = cachesDirectory;
-        debug_log("Caches directory: %s", [cachesDirectory UTF8String]);
+        debug_log(LOG_DEBUG, "Caches directory: %s", [cachesDirectory UTF8String]);
     }
     else
     {
-        debug_log("Fetching info for external process with PID: %d", pid);
+        debug_log(LOG_DEBUG, "Fetching info for external process with PID: %d", pid);
 
         char pathbuf[PROC_PIDPATHINFO_MAXSIZE];
         int ret = proc_pidpath(pid, pathbuf, sizeof(pathbuf));
@@ -158,12 +158,13 @@
                 if ([bundlePath hasSuffix:@".app"])
                 {
                     info[@"BundlePath"] = bundlePath;
-                    debug_log("External bundle path: %s", [bundlePath UTF8String]);
+                    debug_log(LOG_DEBUG, "External bundle path: %s", [bundlePath UTF8String]);
 
                     NSString *bundleIdentifier = [self bundleIdentifierForPath:bundlePath];
                     if (bundleIdentifier != nil)
                     {
-                        debug_log("Bundle Identifier: %s", [bundleIdentifier UTF8String]);
+                        debug_log(LOG_DEBUG, "Bundle Identifier: %s",
+                                  [bundleIdentifier UTF8String]);
 
                         NSString *containerPath = @"/var/mobile/Containers/Data/Application";
                         NSArray *containerDirectories =
@@ -193,31 +194,33 @@
                                     [fullPath stringByAppendingPathComponent:@"Library"];
                                 info[@"CachesDirectory"] =
                                     [fullPath stringByAppendingPathComponent:@"Library/Caches"];
-                                debug_log("Matched container directory: %s", [fullPath UTF8String]);
+                                debug_log(LOG_DEBUG, "Matched container directory: %s",
+                                          [fullPath UTF8String]);
                                 break;
                             }
                         }
                     }
                     else
                     {
-                        debug_log("Failed to retrieve bundle identifier for path: %s",
+                        debug_log(LOG_ERROR, "Failed to retrieve bundle identifier for path: %s",
                                   [bundlePath UTF8String]);
                     }
                 }
                 else
                 {
-                    debug_log("Unexpected path format: %s", [bundlePath UTF8String]);
+                    debug_log(LOG_ERROR, "Unexpected path format: %s", [bundlePath UTF8String]);
                 }
             }
             else
             {
-                debug_log("Failed to convert path to NSString or empty string.");
+                debug_log(LOG_ERROR, "Failed to convert path to NSString or empty string.");
             }
         }
         else
         {
             info[@"Error"] = @"Failed to retrieve bundle path.";
-            debug_log("Failed to retrieve bundle path for PID: %d, proc_pidpath returned: %d", pid,
+            debug_log(LOG_ERROR,
+                      "Failed to retrieve bundle path for PID: %d, proc_pidpath returned: %d", pid,
                       ret);
         }
     }
@@ -240,12 +243,13 @@
         }
         else
         {
-            debug_log("Failed to read Info.plist contents at path: %s", [infoPlistPath UTF8String]);
+            debug_log(LOG_ERROR, "Failed to read Info.plist contents at path: %s",
+                      [infoPlistPath UTF8String]);
         }
     }
     else
     {
-        debug_log("Info.plist does not exist at path: %s", [infoPlistPath UTF8String]);
+        debug_log(LOG_ERROR, "Info.plist does not exist at path: %s", [infoPlistPath UTF8String]);
     }
 
     return nil;
@@ -315,7 +319,7 @@ const char *get_application_info(pid_t pid)
 
         if (![NSJSONSerialization isValidJSONObject:info])
         {
-            debug_log("Error: info dictionary contains non-serializable objects");
+            debug_log(LOG_ERROR, "info dictionary contains non-serializable objects");
             return strdup("Error: info dictionary contains non-serializable objects");
         }
 

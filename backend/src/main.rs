@@ -1,16 +1,8 @@
-use chrono::Local;
 use ctor::ctor;
-use include_dir::{include_dir, Dir};
-use log::info;
-use log::LevelFilter;
+
+use clap::{Arg, Command};
 use std::env;
-use std::io::{stdout, Write};
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
-use warp::http::Response;
-use warp::http::Uri;
-use warp::path::Tail;
-use warp::Filter;
+use std::net::IpAddr;
 
 mod allocator;
 mod api;
@@ -25,10 +17,44 @@ fn init() {
 
 #[tokio::main]
 async fn main() {
-    println!("memory_server has started listening on port 3030.");
     std::env::set_var("MEMORY_SERVER_RUNNING_MODE", "normal");
 
-    env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
+    let matches = Command::new("memory_server")
+        .version("1.0")
+        .about("Dynamic analysis tool")
+        .arg(
+            Arg::new("port")
+                .short('p')
+                .long("port")
+                .num_args(1)
+                .value_name("PORT")
+                .help("Sets the port number to listen on"),
+        )
+        .arg(
+            Arg::new("host")
+                .short('H')
+                .long("host")
+                .num_args(1)
+                .value_name("HOST")
+                .help("Sets the host to listen on"),
+        )
+        .get_matches();
 
-    serve::serve(0).await;
+    let port: u16 = matches
+        .get_one("port")
+        .map(|s: &String| s.parse().expect("Valid port number"))
+        .unwrap_or(3030);
+
+    let host: IpAddr = matches
+        .get_one("host")
+        .map(|s: &String| s.parse().expect("Valid IP address"))
+        .unwrap_or_else(|| "0.0.0.0".parse().unwrap());
+
+    println!(
+        "memory_server has started listening on host {} and port {}.",
+        host, port
+    );
+
+    logger::init_log();
+    serve::serve(0, host, port).await;
 }

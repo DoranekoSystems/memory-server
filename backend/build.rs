@@ -32,7 +32,12 @@ fn main() {
     }
     match target_os.as_str() {
         "windows" => {
+            if build.get_compiler().is_like_msvc() {
+                build.flag("/FS"); // Fixes the PDB write issue
+                build.flag("/EHsc"); // Enables proper exception handling
+            }
             build.file("src/cpp/src/windows/native_api.cpp");
+            build.file("src/cpp/src/windows/file_api.cpp");
         }
         "macos" => {
             build.file("src/cpp/src/darwin/native_api.mm");
@@ -62,11 +67,14 @@ fn main() {
             println!("cargo:rustc-link-lib=static=c++");
             build.flag_if_supported("-DTARGET_IS_ANDROID");
             build.file("src/cpp/src/linux/native_api.cpp");
+            build.file("src/cpp/src/linux/file_api.cpp");
         }
 
         "linux" => {
             build.cpp(true);
+            println!("cargo:rustc-link-arg=-lstdc++");
             build.file("src/cpp/src/linux/native_api.cpp");
+            build.file("src/cpp/src/linux/file_api.cpp");
         }
 
         _ => {

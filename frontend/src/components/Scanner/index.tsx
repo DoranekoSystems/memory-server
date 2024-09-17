@@ -1,29 +1,33 @@
 import React, { useState, useEffect, useRef } from "react";
 import axios from "axios";
-import { useStore } from "./global-store";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { TriStateCheckbox, NormalCheckbox } from "@/components/ui/checkbox";
+import { useStore } from "@/lib/global-store";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/common/Card";
+import { Label } from "@/components/common/Label";
+import { Input } from "@/components/common/Input";
+import { Button } from "@/components/common/Button";
+import { TriStateCheckbox, NormalCheckbox } from "@/components/common/CheckBox";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import ScanTable from "./ui/scantable";
-import TabBar from "@/components/tabbar";
+} from "@/components/common/Select";
+import ScanTable from "./ScanTable";
+import TabBar from "./TaBbar";
 
 import {
   convertFromLittleEndianHex,
   convertToLittleEndianHex,
-} from "../lib/converter";
-import { getMemoryRegions } from "../lib/api";
+} from "@/lib/converter";
+import { getMemoryRegions } from "@/lib/api";
 
 export function Scanner({ currentPage }) {
-  // State
   const [tabs, setTabs] = useState([{ id: "Scan 1", label: "Scan 1" }]);
   const [activeTab, setActiveTab] = useState("Scan 1");
   const [tabStates, setTabStates] = useState({
@@ -58,21 +62,16 @@ export function Scanner({ currentPage }) {
   const [nextScanNumber, setNextScanNumber] = useState(2);
   const [closedNumbers, setClosedNumbers] = useState(new Set());
 
-  // Refs
   const tableRef = useRef(null);
 
-  // Global state
   const ipAddress = useStore((state) => state.ipAddress);
   const serverMode = useStore((state) => state.serverMode);
 
-  // Effects
   useEffect(() => {
     const currentState = getCurrentTabState();
     const protectionString = getProtectionString(currentState.protection);
-    // Use protectionString as needed
   }, [activeTab, tabStates]);
 
-  // Helper functions
   const getCurrentTabState = () => {
     const state = tabStates[activeTab];
     return state;
@@ -614,6 +613,7 @@ export function Scanner({ currentPage }) {
               handleSelect={handleSelect}
               dataType={getCurrentTabState().dataType}
               convertFromLittleEndianHex={convertFromLittleEndianHex}
+              currentPage={currentPage}
             />
           </CardContent>
         </Card>

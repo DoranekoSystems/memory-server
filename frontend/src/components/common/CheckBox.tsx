@@ -1,7 +1,7 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 import { useState, useEffect } from "react";
-import { Label } from "@/components/ui/label";
+import { Label } from "./Label";
 
 const NormalCheckbox = ({ id, label, value, onStateChange }) => {
   const [internalState, setInternalState] = useState(value);

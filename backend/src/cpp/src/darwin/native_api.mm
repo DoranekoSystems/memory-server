@@ -15,16 +15,26 @@
 
 PROC_REGIONFILENAME proc_regionfilename = nullptr;
 PROC_PIDPATH proc_pidpath = nullptr;
+extern ServerState global_server_state;
 
-int debug_log(const char *format, ...)
+int debug_log(LogLevel level, const char *format, ...)
 {
     va_list list;
     va_start(list, format);
-    NSString *originalFormatString = [NSString stringWithUTF8String:format];
-    NSString *taggedFormatString =
-        [NSString stringWithFormat:@"[MEMORYSERVER] %@", originalFormatString];
 
-    NSLogv(taggedFormatString, list);
+    char buffer[1024];
+
+    char tagged_format[1024];
+    snprintf(tagged_format, sizeof(tagged_format), "[NATIVE] %s", format);
+
+    vsnprintf(buffer, sizeof(buffer), tagged_format, list);
+    native_log(level, buffer);
+
+    NSString *nsFinalMessage = [NSString stringWithUTF8String:buffer];
+    if (global_server_state.mode == ServerMode::EMBEDDED)
+    {
+        NSLog(@"%@", nsFinalMessage);
+    }
     va_end(list);
     return 0;
 }
@@ -48,7 +58,8 @@ ssize_t read_memory_native(int pid, mach_vm_address_t address, mach_vm_size_t si
         kr = task_for_pid(mach_task_self(), pid, &task);
         if (kr != KERN_SUCCESS)
         {
-            debug_log("Error: task_for_pid failed with error %d (%s)\n", kr, mach_error_string(kr));
+            debug_log(LOG_ERROR, "task_for_pid failed with error %d (%s)\n", kr,
+                      mach_error_string(kr));
             return -1;
         }
     }
@@ -57,7 +68,7 @@ ssize_t read_memory_native(int pid, mach_vm_address_t address, mach_vm_size_t si
     kr = mach_vm_read_overwrite(task, address, size, (mach_vm_address_t)buffer, &out_size);
     if (kr != KERN_SUCCESS)
     {
-        debug_log("Error: mach_vm_read_overwrite failed with error %d (%s)\n", kr,
+        debug_log(LOG_DEBUG, "mach_vm_read_overwrite failed with error %d (%s)\n", kr,
                   mach_error_string(kr));
         return -1;
     }
@@ -85,7 +96,7 @@ ssize_t write_memory_native(int pid, mach_vm_address_t address, mach_vm_size_t s
         err = task_for_pid(mach_task_self(), pid, &task);
         if (err != KERN_SUCCESS)
         {
-            debug_log("Error: task_for_pid failed with error %d (%s)\n", err,
+            debug_log(LOG_ERROR, "task_for_pid failed with error %d (%s)\n", err,
                       mach_error_string(err));
             return -1;
         }
@@ -102,7 +113,8 @@ ssize_t write_memory_native(int pid, mach_vm_address_t address, mach_vm_size_t s
                          (vm_region_info_t)&info, &info_count, &object_name);
     if (err != KERN_SUCCESS)
     {
-        debug_log("Error: mach_vm_region failed with error %d (%s) at address "
+        debug_log(LOG_ERROR,
+                  "mach_vm_region failed with error %d (%s) at address "
                   "0x%llx, size 0x%llx\n",
                   err, mach_error_string(err), address, size);
         if (!is_embedded_mode)
@@ -116,7 +128,7 @@ ssize_t write_memory_native(int pid, mach_vm_address_t address, mach_vm_size_t s
     err = mach_vm_protect(task, address, size, false, VM_PROT_READ | VM_PROT_WRITE);
     if (err != KERN_SUCCESS)
     {
-        debug_log("Error: mach_vm_protect (write enable) failed with error %d (%s)\n", err,
+        debug_log(LOG_ERROR, "mach_vm_protect (write enable) failed with error %d (%s)\n", err,
                   mach_error_string(err));
         if (!is_embedded_mode)
         {
@@ -128,7 +140,8 @@ ssize_t write_memory_native(int pid, mach_vm_address_t address, mach_vm_size_t s
     err = mach_vm_write(task, address, (vm_offset_t)buffer, size);
     if (err != KERN_SUCCESS)
     {
-        debug_log("Error: mach_vm_write failed with error %d (%s) at address "
+        debug_log(LOG_ERROR,
+                  "mach_vm_write failed with error %d (%s) at address "
                   "0x%llx, size 0x%llx\n",
                   err, mach_error_string(err), address, size);
         mach_vm_protect(task, address, size, false, original_protection);
@@ -142,7 +155,8 @@ ssize_t write_memory_native(int pid, mach_vm_address_t address, mach_vm_size_t s
     err = mach_vm_protect(task, address, size, false, original_protection);
     if (err != KERN_SUCCESS)
     {
-        debug_log("Warning: mach_vm_protect (restore protection) failed with error "
+        debug_log(LOG_ERROR,
+                  "mach_vm_protect (restore protection) failed with error "
                   "%d (%s)\n",
                   err, mach_error_string(err));
         if (!is_embedded_mode)
@@ -176,7 +190,7 @@ void enumerate_regions_to_buffer(pid_t pid, char *buffer, size_t buffer_size)
         err = task_for_pid(mach_task_self(), pid, &task);
         if (err != KERN_SUCCESS)
         {
-            debug_log("Error: task_for_pid failed with error %d (%s)\n", err,
+            debug_log(LOG_ERROR, "task_for_pid failed with error %d (%s)\n", err,
                       mach_error_string(err));
             snprintf(buffer, buffer_size, "Failed to get task for pid %d\n", pid);
             return;
@@ -184,6 +198,8 @@ void enumerate_regions_to_buffer(pid_t pid, char *buffer, size_t buffer_size)
     }
 
     size_t pos = 0;
+    char buf[PATH_MAX];
+    memset(buf, 0, PATH_MAX);
     while (true)
     {
         vm_region_submap_info_data_64_t info;
@@ -206,9 +222,15 @@ void enumerate_regions_to_buffer(pid_t pid, char *buffer, size_t buffer_size)
             if (info.protection & VM_PROT_WRITE) protection[1] = 'w';
             if (info.protection & VM_PROT_EXECUTE) protection[2] = 'x';
 
-            pos += snprintf(buffer + pos, buffer_size - pos, "%llx-%llx %s\n",
+            int ret = proc_regionfilename(pid, static_cast<unsigned long long>(address), buf,
+                                          sizeof(buf));
+            if (ret == 0)
+            {
+                buf[0] = '\x00';
+            }
+            pos += snprintf(buffer + pos, buffer_size - pos, "%llx-%llx %s _ _ _ %s\n",
                             static_cast<unsigned long long>(address),
-                            static_cast<unsigned long long>(address + size), protection);
+                            static_cast<unsigned long long>(address + size), protection, buf);
 
             if (pos >= buffer_size - 1) break;
 
@@ -288,7 +310,7 @@ ProcessInfo *enumprocess_native(size_t *count)
         {
             free(result);
         }
-        debug_log("Error: Failed to enumerate processes, error %d\n", err);
+        debug_log(LOG_ERROR, "Failed to enumerate processes, error %d\n", err);
         return nullptr;
     }
 }
@@ -300,19 +322,21 @@ bool suspend_process(pid_t pid)
     bool is_embedded_mode = pid == getpid();
     if (is_embedded_mode)
     {
-        debug_log("Error: Cannot suspend self process\n");
+        debug_log(LOG_ERROR, "Cannot suspend self process\n");
         return false;
     }
     err = task_for_pid(mach_task_self(), pid, &task);
     if (err != KERN_SUCCESS)
     {
-        debug_log("Error: task_for_pid failed with error %d (%s)\n", err, mach_error_string(err));
+        debug_log(LOG_ERROR, "task_for_pid failed with error %d (%s)\n", err,
+                  mach_error_string(err));
         return false;
     }
     err = task_suspend(task);
     if (err != KERN_SUCCESS)
     {
-        debug_log("Error: task_suspend failed with error %d (%s)\n", err, mach_error_string(err));
+        debug_log(LOG_ERROR, "task_suspend failed with error %d (%s)\n", err,
+                  mach_error_string(err));
         return false;
     }
 
@@ -326,19 +350,21 @@ bool resume_process(pid_t pid)
     bool is_embedded_mode = pid == getpid();
     if (is_embedded_mode)
     {
-        debug_log("Error: Cannot resume self process\n");
+        debug_log(LOG_ERROR, "Cannot resume self process\n");
         return false;
     }
     err = task_for_pid(mach_task_self(), pid, &task);
     if (err != KERN_SUCCESS)
     {
-        debug_log("Error: task_for_pid failed with error %d (%s)\n", err, mach_error_string(err));
+        debug_log(LOG_ERROR, "task_for_pid failed with error %d (%s)\n", err,
+                  mach_error_string(err));
         return false;
     }
     err = task_resume(task);
     if (err != KERN_SUCCESS)
     {
-        debug_log("Error: task_resume failed with error %d (%s)\n", err, mach_error_string(err));
+        debug_log(LOG_ERROR, "task_resume failed with error %d (%s)\n", err,
+                  mach_error_string(err));
         return false;
     }
 
@@ -351,7 +377,7 @@ static std::uint64_t get_image_size_64(int pid, mach_vm_address_t base_address)
     if (read_memory_native(pid, base_address, sizeof(mach_header_64),
                            reinterpret_cast<unsigned char *>(&header)) <= 0)
     {
-        debug_log("Error: Failed to read 64-bit Mach-O header\n");
+        debug_log(LOG_ERROR, "Failed to read 64-bit Mach-O header\n");
         return 0;
     }
 
@@ -364,7 +390,7 @@ static std::uint64_t get_image_size_64(int pid, mach_vm_address_t base_address)
         if (read_memory_native(pid, current_address, sizeof(load_command),
                                reinterpret_cast<unsigned char *>(&lc)) <= 0)
         {
-            debug_log("Error: Failed to read load command\n");
+            debug_log(LOG_ERROR, "Failed to read load command\n");
             return 0;
         }
 
@@ -374,7 +400,7 @@ static std::uint64_t get_image_size_64(int pid, mach_vm_address_t base_address)
             if (read_memory_native(pid, current_address, sizeof(segment_command_64),
                                    reinterpret_cast<unsigned char *>(&seg)) <= 0)
             {
-                debug_log("Error: Failed to read segment command\n");
+                debug_log(LOG_ERROR, "Failed to read segment command\n");
                 return 0;
             }
             image_size += seg.vmsize;
@@ -392,7 +418,7 @@ static std::uint64_t get_image_size_32(int pid, mach_vm_address_t base_address)
     if (read_memory_native(pid, base_address, sizeof(mach_header),
                            reinterpret_cast<unsigned char *>(&header)) <= 0)
     {
-        debug_log("Error: Failed to read 32-bit Mach-O header\n");
+        debug_log(LOG_ERROR, "Failed to read 32-bit Mach-O header\n");
         return 0;
     }
 
@@ -405,7 +431,7 @@ static std::uint64_t get_image_size_32(int pid, mach_vm_address_t base_address)
         if (read_memory_native(pid, current_address, sizeof(load_command),
                                reinterpret_cast<unsigned char *>(&lc)) <= 0)
         {
-            debug_log("Error: Failed to read load command\n");
+            debug_log(LOG_ERROR, "Failed to read load command\n");
             return 0;
         }
 
@@ -415,7 +441,7 @@ static std::uint64_t get_image_size_32(int pid, mach_vm_address_t base_address)
             if (read_memory_native(pid, current_address, sizeof(segment_command),
                                    reinterpret_cast<unsigned char *>(&seg)) <= 0)
             {
-                debug_log("Error: Failed to read segment command\n");
+                debug_log(LOG_ERROR, "Failed to read segment command\n");
                 return 0;
             }
             image_size += seg.vmsize;
@@ -433,7 +459,7 @@ static std::uint64_t get_module_size(int pid, mach_vm_address_t address, bool *i
     if (read_memory_native(pid, address, sizeof(std::uint32_t),
                            reinterpret_cast<unsigned char *>(&magic)) <= 0)
     {
-        debug_log("Error: Failed to read Mach-O magic number\n");
+        debug_log(LOG_ERROR, "Failed to read Mach-O magic number\n");
         return 0;
     }
 
@@ -453,7 +479,7 @@ static std::uint64_t get_module_size(int pid, mach_vm_address_t address, bool *i
         if (read_memory_native(pid, address, sizeof(fat_header),
                                reinterpret_cast<unsigned char *>(&fatHeader)) <= 0)
         {
-            debug_log("Error: Failed to read FAT header\n");
+            debug_log(LOG_ERROR, "Failed to read FAT header\n");
             return 0;
         }
 
@@ -462,7 +488,7 @@ static std::uint64_t get_module_size(int pid, mach_vm_address_t address, bool *i
                                fatHeader.nfat_arch * sizeof(fat_arch),
                                reinterpret_cast<unsigned char *>(archs.data())) <= 0)
         {
-            debug_log("Error: Failed to read FAT architectures\n");
+            debug_log(LOG_ERROR, "Failed to read FAT architectures\n");
             return 0;
         }
 
@@ -471,7 +497,7 @@ static std::uint64_t get_module_size(int pid, mach_vm_address_t address, bool *i
             if (read_memory_native(pid, address + arch.offset, sizeof(std::uint32_t),
                                    reinterpret_cast<unsigned char *>(&magic)) <= 0)
             {
-                debug_log("Error: Failed to read Mach-O magic number in FAT binary\n");
+                debug_log(LOG_ERROR, "Failed to read Mach-O magic number in FAT binary\n");
                 continue;
             }
             if (magic == MH_MAGIC_64)
@@ -487,7 +513,7 @@ static std::uint64_t get_module_size(int pid, mach_vm_address_t address, bool *i
         }
     }
 
-    debug_log("Error: Unknown Mach-O format\n");
+    debug_log(LOG_ERROR, "Unknown Mach-O format\n");
     return 0;
 }
 
@@ -506,7 +532,7 @@ ModuleInfo *enummodule_native(pid_t pid, size_t *count)
         err = task_for_pid(mach_task_self(), pid, &task);
         if (err != KERN_SUCCESS)
         {
-            debug_log("Error: task_for_pid failed with error %d (%s)\n", err,
+            debug_log(LOG_ERROR, "task_for_pid failed with error %d (%s)\n", err,
                       mach_error_string(err));
             *count = 0;
             return nullptr;
@@ -518,7 +544,7 @@ ModuleInfo *enummodule_native(pid_t pid, size_t *count)
     if (task_info(task, TASK_DYLD_INFO, reinterpret_cast<task_info_t>(&dyld_info), &count_info) !=
         KERN_SUCCESS)
     {
-        debug_log("Error: Failed to get task info\n");
+        debug_log(LOG_ERROR, "Failed to get task info\n");
         *count = 0;
         return nullptr;
     }
@@ -527,7 +553,7 @@ ModuleInfo *enummodule_native(pid_t pid, size_t *count)
     if (read_memory_native(pid, dyld_info.all_image_info_addr, sizeof(dyld_all_image_infos),
                            reinterpret_cast<unsigned char *>(&all_image_infos)) <= 0)
     {
-        debug_log("Error: Failed to read all_image_infos\n");
+        debug_log(LOG_ERROR, "Failed to read all_image_infos\n");
         *count = 0;
         return nullptr;
     }
@@ -537,7 +563,7 @@ ModuleInfo *enummodule_native(pid_t pid, size_t *count)
                            sizeof(dyld_image_info) * all_image_infos.infoArrayCount,
                            reinterpret_cast<unsigned char *>(image_infos.data())) <= 0)
     {
-        debug_log("Error: Failed to read image_infos\n");
+        debug_log(LOG_ERROR, "Failed to read image_infos\n");
         *count = 0;
         return nullptr;
     }
@@ -582,10 +608,11 @@ ModuleInfo *enummodule_native(pid_t pid, size_t *count)
 
 int native_init(int mode)
 {
+    global_server_state.mode = mode;
     void *libsystem_kernel = dlopen("/usr/lib/system/libsystem_kernel.dylib", RTLD_NOW);
     if (!libsystem_kernel)
     {
-        debug_log("Error: Failed to load libsystem_kernel.dylib: %s\n", dlerror());
+        debug_log(LOG_ERROR, "Failed to load libsystem_kernel.dylib: %s\n", dlerror());
         return -1;
     }
 
@@ -596,27 +623,27 @@ int native_init(int mode)
     char *dlsym_error = dlerror();
     if (dlsym_error)
     {
-        debug_log("Error: Failed to load proc_pidpath symbol: %s\n", dlsym_error);
+        debug_log(LOG_ERROR, "Failed to load proc_pidpath symbol: %s\n", dlsym_error);
         proc_pidpath = nullptr;
     }
 
     if (proc_pidpath == nullptr)
     {
-        debug_log("Warning: proc_pidpath is not available. Some functionality may be limited.\n");
+        debug_log(LOG_ERROR, "proc_pidpath is not available. Some functionality may be limited.\n");
     }
 
     proc_regionfilename = (PROC_REGIONFILENAME)dlsym(libsystem_kernel, "proc_regionfilename");
     dlsym_error = dlerror();
     if (dlsym_error)
     {
-        debug_log("Error: Failed to load proc_regionfilename symbol: %s\n", dlsym_error);
+        debug_log(LOG_ERROR, "Failed to load proc_regionfilename symbol: %s\n", dlsym_error);
         proc_regionfilename = nullptr;
     }
 
     if (proc_regionfilename == nullptr)
     {
-        debug_log("Warning: proc_regionfilename is not available. Some "
-                  "functionality may be limited.\n");
+        debug_log(LOG_ERROR, "proc_regionfilename is not available. Some "
+                             "functionality may be limited.\n");
     }
     return 1;
 }

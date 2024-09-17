@@ -183,7 +183,7 @@ void enumerate_regions_to_buffer(DWORD pid, char *buffer, size_t buffer_size)
         snprintf(end_address, sizeof(end_address), "%p",
                  (unsigned char *)addr + memInfo.RegionSize - 1);
 
-        int written = snprintf(buffer + offset, buffer_size - offset, "%s-%s %s %s %s\n",
+        int written = snprintf(buffer + offset, buffer_size - offset, "%s-%s %s %s _ _ %s\n",
                                start_address, end_address, permissions,
                                memInfo.State == MEM_COMMIT    ? "committed"
                                : memInfo.State == MEM_RESERVE ? "reserved"

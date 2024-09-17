@@ -19,7 +19,7 @@ fn main() {
             env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
 
             let host: IpAddr = "0.0.0.0".parse().unwrap();
-            let port: u16 = 3031;
+            let port: u16 = 3030;
             println!(
                 "memory_gadget has started listening on host {} and port {}.",
                 host, port

@@ -14,16 +14,18 @@ static process_vm_writev_func PROCESS_VM_WRITEV = nullptr;
 
 #endif
 
-int debug_log(const char *format, ...)
+int debug_log(LogLevel level, const char *format, ...)
 {
     va_list args;
     va_start(args, format);
 
-    char tagged_format[256];
-    snprintf(tagged_format, sizeof(tagged_format), "[MEMORYSERVER] %s", format);
+    char tagged_format[1024];
 
-    vprintf(tagged_format, args);
-    printf("\n");
+    char buffer[1024];
+    snprintf(tagged_format, sizeof(tagged_format), "[NATIVE] %s", format);
+    vsnprintf(buffer, sizeof(buffer), tagged_format, args);
+
+    native_log(level, buffer);
 
 #ifdef TARGET_IS_ANDROID
     __android_log_vprint(ANDROID_LOG_DEBUG, "MEMORYSERVER", tagged_format, args);
@@ -56,14 +58,15 @@ ssize_t read_memory_native(int pid, uintptr_t address, size_t size, unsigned cha
 
     if (nread < 0)
     {
-        debug_log("Error: Failed to read memory from process %d at address 0x%lx. Error: %d (%s)\n",
-                  pid, address, errno, strerror(errno));
+        debug_log(LOG_DEBUG,
+                  "Failed to read memory from process %d at address 0x%lx. Error: %d (%s)\n", pid,
+                  address, errno, strerror(errno));
         return -errno;
     }
 
     if (static_cast<size_t>(nread) < size)
     {
-        debug_log("Warning: Partial read from process %d. Requested %zu bytes, read %zd bytes\n",
+        debug_log(LOG_WARN, "Partial read from process %d. Requested %zu bytes, read %zd bytes\n",
                   pid, size, nread);
     }
 
@@ -86,7 +89,7 @@ ssize_t write_memory_native(int pid, void *address, size_t size, unsigned char *
                               PROT_READ | PROT_WRITE | PROT_EXEC);
         if (result != 0)
         {
-            debug_log("Error: mprotect failed with error %d (%s)\n", errno, strerror(errno));
+            debug_log(LOG_ERROR, "mprotect failed with error %d (%s)\n", errno, strerror(errno));
             return -1;
         }
 
@@ -100,12 +103,12 @@ ssize_t write_memory_native(int pid, void *address, size_t size, unsigned char *
 #endif
         if (written == -1)
         {
-            debug_log("Error: process_vm_writev failed with error %d (%s)\n", errno,
+            debug_log(LOG_ERROR, "process_vm_writev failed with error %d (%s)\n", errno,
                       strerror(errno));
             return -1;
         }
 
-        debug_log("Successfully wrote %zd bytes to own process memory\n", written);
+        debug_log(LOG_DEBUG, "Successfully wrote %zd bytes to own process memory\n", written);
         return written;
     }
     else
@@ -113,7 +116,7 @@ ssize_t write_memory_native(int pid, void *address, size_t size, unsigned char *
         // Writing to another process
         if (ptrace(PTRACE_ATTACH, pid, NULL, NULL) == -1)
         {
-            debug_log("Error: Failed to attach to process %d. Error: %d (%s)\n", pid, errno,
+            debug_log(LOG_ERROR, "Failed to attach to process %d. Error: %d (%s)\n", pid, errno,
                       strerror(errno));
             return -1;
         }
@@ -128,8 +131,8 @@ ssize_t write_memory_native(int pid, void *address, size_t size, unsigned char *
                     ptrace(PTRACE_PEEKDATA, pid, reinterpret_cast<char *>(address) + i, NULL);
                 if (errno != 0)
                 {
-                    debug_log("Error: ptrace PEEKDATA failed at offset %zu. Error: %d (%s)\n", i,
-                              errno, strerror(errno));
+                    debug_log(LOG_ERROR, "ptrace PEEKDATA failed at offset %zu. Error: %d (%s)\n",
+                              i, errno, strerror(errno));
                     ptrace(PTRACE_DETACH, pid, NULL, NULL);
                     return -1;
                 }
@@ -138,8 +141,8 @@ ssize_t write_memory_native(int pid, void *address, size_t size, unsigned char *
 
                 if (ptrace(PTRACE_POKEDATA, pid, reinterpret_cast<char *>(address) + i, orig) == -1)
                 {
-                    debug_log("Error: ptrace POKEDATA failed at offset %zu. Error: %d (%s)\n", i,
-                              errno, strerror(errno));
+                    debug_log(LOG_ERROR, "ptrace POKEDATA failed at offset %zu. Error: %d (%s)\n",
+                              i, errno, strerror(errno));
                     ptrace(PTRACE_DETACH, pid, NULL, NULL);
                     return -1;
                 }
@@ -151,8 +154,8 @@ ssize_t write_memory_native(int pid, void *address, size_t size, unsigned char *
                 std::memcpy(&data, reinterpret_cast<char *>(buffer) + i, sizeof(long));
                 if (ptrace(PTRACE_POKEDATA, pid, reinterpret_cast<char *>(address) + i, data) == -1)
                 {
-                    debug_log("Error: ptrace POKEDATA failed at offset %zu. Error: %d (%s)\n", i,
-                              errno, strerror(errno));
+                    debug_log(LOG_ERROR, "ptrace POKEDATA failed at offset %zu. Error: %d (%s)\n",
+                              i, errno, strerror(errno));
                     ptrace(PTRACE_DETACH, pid, NULL, NULL);
                     return -1;
                 }
@@ -162,7 +165,7 @@ ssize_t write_memory_native(int pid, void *address, size_t size, unsigned char *
 
         if (ptrace(PTRACE_DETACH, pid, NULL, NULL) == -1)
         {
-            debug_log("Warning: Failed to detach from process %d. Error: %d (%s)\n", pid, errno,
+            debug_log(LOG_WARN, "Failed to detach from process %d. Error: %d (%s)\n", pid, errno,
                       strerror(errno));
         }
 
@@ -178,7 +181,7 @@ void enumerate_regions_to_buffer(pid_t pid, char *buffer, size_t buffer_size)
     std::ifstream maps_file(maps_file_path);
     if (!maps_file.is_open())
     {
-        debug_log("Error: Failed to open file: %s\n", maps_file_path);
+        debug_log(LOG_ERROR, "Failed to open file: %s\n", maps_file_path);
         snprintf(buffer, buffer_size, "Failed to open file: %s", maps_file_path);
         return;
     }
@@ -195,7 +198,7 @@ void enumerate_regions_to_buffer(pid_t pid, char *buffer, size_t buffer_size)
 
     if (!maps_file.eof())
     {
-        debug_log("Warning: Buffer size %zu was not enough to store all regions for pid %d\n",
+        debug_log(LOG_ERROR, "Buffer size %zu was not enough to store all regions for pid %d\n",
                   buffer_size, pid);
     }
 
@@ -207,7 +210,7 @@ ProcessInfo *enumprocess_native(size_t *count)
     DIR *proc_dir = opendir("/proc");
     if (!proc_dir)
     {
-        debug_log("Error: Failed to open /proc directory\n");
+        debug_log(LOG_ERROR, "Failed to open /proc directory\n");
         return nullptr;
     }
 
@@ -236,7 +239,8 @@ ProcessInfo *enumprocess_native(size_t *count)
                 process.processname = static_cast<char *>(malloc(len + 1));
                 if (!process.processname)
                 {
-                    debug_log("Error: Failed to allocate memory for process name (pid: %d)\n", pid);
+                    debug_log(LOG_ERROR, "Failed to allocate memory for process name (pid: %d)\n",
+                              pid);
                     continue;
                 }
                 memcpy(process.processname, processname.c_str(), len);
@@ -246,7 +250,7 @@ ProcessInfo *enumprocess_native(size_t *count)
                     realloc(processes, (*count + 1) * sizeof(ProcessInfo)));
                 if (!new_processes)
                 {
-                    debug_log("Error: Failed to reallocate memory for processes array\n");
+                    debug_log(LOG_ERROR, "Failed to reallocate memory for processes array\n");
                     free(process.processname);
                     break;
                 }
@@ -256,7 +260,7 @@ ProcessInfo *enumprocess_native(size_t *count)
             }
             else
             {
-                debug_log("Warning: Failed to open comm file for pid %d\n", pid);
+                debug_log(LOG_WARN, "Failed to open comm file for pid %d\n", pid);
             }
         }
     }
@@ -269,7 +273,7 @@ bool suspend_process(pid_t pid)
 {
     if (kill(pid, SIGSTOP) == -1)
     {
-        debug_log("Error: Failed to suspend process %d. Error: %d (%s)\n", pid, errno,
+        debug_log(LOG_ERROR, "Failed to suspend process %d. Error: %d (%s)\n", pid, errno,
                   strerror(errno));
         return false;
     }
@@ -280,7 +284,7 @@ bool resume_process(pid_t pid)
 {
     if (kill(pid, SIGCONT) == -1)
     {
-        debug_log("Error: Failed to resume process %d. Error: %d (%s)\n", pid, errno,
+        debug_log(LOG_ERROR, "Failed to resume process %d. Error: %d (%s)\n", pid, errno,
                   strerror(errno));
         return false;
     }
@@ -418,14 +422,14 @@ int native_init(int mode)
     void *handle = dlopen("libc.so", RTLD_NOW);
     if (!handle)
     {
-        debug_log("Error: Failed to open libc.so. Error: %s\n", dlerror());
+        debug_log(LOG_ERROR, "Failed to open libc.so. Error: %s\n", dlerror());
         return -1;
     }
 
     PROCESS_VM_READV = (process_vm_readv_func)dlsym(handle, "process_vm_readv");
     if (!PROCESS_VM_READV)
     {
-        debug_log("Error: Failed to find process_vm_readv symbol. Error: %s\n", dlerror());
+        debug_log(LOG_ERROR, "Failed to find process_vm_readv symbol. Error: %s\n", dlerror());
         dlclose(handle);
         return -1;
     }
@@ -433,7 +437,7 @@ int native_init(int mode)
     PROCESS_VM_WRITEV = (process_vm_writev_func)dlsym(handle, "process_vm_writev");
     if (!PROCESS_VM_WRITEV)
     {
-        debug_log("Error: Failed to find process_vm_writev symbol. Error: %s\n", dlerror());
+        debug_log(LOG_ERROR, "Failed to find process_vm_writev symbol. Error: %s\n", dlerror());
         dlclose(handle);
         return -1;
     }

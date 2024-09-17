@@ -26,6 +26,15 @@
 #include <string>
 #include <vector>
 
+enum LogLevel
+{
+    LOG_TRACE,
+    LOG_DEBUG,
+    LOG_INFO,
+    LOG_WARN,
+    LOG_ERROR
+};
+
 typedef struct
 {
     int pid;
@@ -40,7 +49,8 @@ typedef struct
     char *modulename;
 } ModuleInfo;
 
-extern "C" int debug_log(const char *format, ...);
+extern "C" void native_log(int level, const char *message);
+int debug_log(LogLevel level, const char *format, ...);
 extern "C" pid_t get_pid_native();
 extern "C" ssize_t read_memory_native(int pid, uintptr_t address, size_t size,
                                       unsigned char *buffer);

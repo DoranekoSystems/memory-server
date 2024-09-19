@@ -7,6 +7,8 @@ use warp::Filter;
 
 use crate::api;
 use crate::logger;
+use crate::native_bridge;
+use crate::request;
 
 pub async fn serve(mode: i32, host: IpAddr, port: u16) {
     let pid_state = Arc::new(Mutex::new(None));
@@ -39,7 +41,7 @@ pub async fn serve(mode: i32, host: IpAddr, port: u16) {
 
     let read_memory = warp::path!("readmemory")
         .and(warp::get())
-        .and(warp::query::<api::ReadMemoryRequest>())
+        .and(warp::query::<request::ReadMemoryRequest>())
         .and(api::with_state(pid_state.clone()))
         .and_then(|read_memory_request, pid_state| async move {
             api::read_memory_handler(pid_state, read_memory_request).await
@@ -48,7 +50,7 @@ pub async fn serve(mode: i32, host: IpAddr, port: u16) {
     let read_memory_multiple = warp::path!("readmemories")
         .and(warp::post())
         .and(warp::body::content_length_limit(1024 * 1024 * 10)) // 10MB
-        .and(warp::body::json::<Vec<api::ReadMemoryRequest>>())
+        .and(warp::body::json::<Vec<request::ReadMemoryRequest>>())
         .and(api::with_state(pid_state.clone()))
         .and_then(|read_memory_requests, pid_state| async move {
             api::read_memory_multiple_handler(pid_state, read_memory_requests).await
@@ -85,7 +87,7 @@ pub async fn serve(mode: i32, host: IpAddr, port: u16) {
 
     let resolve_addr = warp::path!("resolveaddr")
         .and(warp::get())
-        .and(warp::query::<api::ResolveAddrRequest>())
+        .and(warp::query::<request::ResolveAddrRequest>())
         .and(api::with_state(pid_state.clone()))
         .and_then(|resolve_addr_request, pid_state| async move {
             api::resolve_addr_handler(pid_state, resolve_addr_request).await
@@ -93,14 +95,14 @@ pub async fn serve(mode: i32, host: IpAddr, port: u16) {
 
     let explore_directory = warp::path!("exploredirectory")
         .and(warp::get())
-        .and(warp::query::<api::ExploreDirectoryRequest>())
+        .and(warp::query::<request::ExploreDirectoryRequest>())
         .and_then(|explore_directory_request| async move {
             api::explore_directory_handler(explore_directory_request).await
         });
 
     let read_file = warp::path!("readfile")
         .and(warp::get())
-        .and(warp::query::<api::ReadFileRequest>())
+        .and(warp::query::<request::ReadFileRequest>())
         .and_then(
             |read_file_request| async move { api::read_file_handler(read_file_request).await },
         );
@@ -113,6 +115,22 @@ pub async fn serve(mode: i32, host: IpAddr, port: u16) {
     let server_info = warp::path!("serverinfo")
         .and(warp::get())
         .and_then(api::server_info_handler);
+
+    let set_watchpoint = warp::path!("watchpoint")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(api::with_state(pid_state.clone()))
+        .and_then(|set_watchpoint_request, pid_state| async move {
+            api::set_watchpoint_handler(pid_state, set_watchpoint_request).await
+        });
+
+    let remove_watchpoint = warp::path!("watchpoint")
+        .and(warp::delete())
+        .and(warp::body::json())
+        .and(api::with_state(pid_state.clone()))
+        .and_then(|remove_watchpoint_request, pid_state| async move {
+            api::remove_watchpoint_handler(pid_state, remove_watchpoint_request).await
+        });
 
     let routes = open_process
         .or(read_memory)
@@ -128,11 +146,13 @@ pub async fn serve(mode: i32, host: IpAddr, port: u16) {
         .or(read_file)
         .or(get_app_info)
         .or(server_info)
+        .or(set_watchpoint)
+        .or(remove_watchpoint)
         .or(static_files)
         .with(cors)
         .with(warp::log::custom(logger::http_log));
 
-    api::native_api_init(mode);
+    native_bridge::native_api_init(mode);
     warp::serve(routes).run((host, port)).await;
 }
 

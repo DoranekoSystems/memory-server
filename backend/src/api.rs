@@ -30,6 +30,10 @@ use std::sync::{Arc, Mutex};
 use warp::hyper::Body;
 use warp::{http::Response, http::StatusCode, Filter, Rejection, Reply};
 
+use crate::native_bridge;
+use crate::request;
+use crate::util;
+
 #[no_mangle]
 pub extern "C" fn native_log(level: c_int, message: *const c_char) {
     let log_message = unsafe { CStr::from_ptr(message).to_string_lossy().into_owned() };
@@ -44,58 +48,12 @@ pub extern "C" fn native_log(level: c_int, message: *const c_char) {
     }
 }
 
-#[cfg_attr(target_os = "android", link(name = "c++_static", kind = "static"))]
-#[cfg_attr(target_os = "android", link(name = "c++abi", kind = "static"))]
-#[link(name = "native", kind = "static")]
-extern "C" {
-    fn get_pid_native() -> i32;
-    fn enumprocess_native(count: *mut usize) -> *mut ProcessInfo;
-    fn enummodule_native(pid: i32, count: *mut usize) -> *mut ModuleInfo;
-    fn enumerate_regions_to_buffer(pid: i32, buffer: *mut u8, buffer_size: usize);
-    fn read_memory_native(
-        pid: libc::c_int,
-        address: libc::uintptr_t,
-        size: libc::size_t,
-        buffer: *mut u8,
-    ) -> libc::ssize_t;
-    fn write_memory_native(
-        pid: i32,
-        address: libc::uintptr_t,
-        size: libc::size_t,
-        buffer: *const u8,
-    ) -> libc::ssize_t;
-    fn suspend_process(pid: i32) -> bool;
-    fn resume_process(pid: i32) -> bool;
-    fn native_init(mode: i32) -> libc::c_int;
-    fn explore_directory(path: *const c_char, max_depth: i32) -> *mut libc::c_char;
-    fn read_file(
-        path: *const c_char,
-        size: *mut usize,
-        error_message: *mut *mut c_char,
-    ) -> *const c_void;
-    fn get_application_info(pid: c_int) -> *const c_char;
-}
-
-#[repr(C)]
-struct ProcessInfo {
-    pid: i32,
-    processname: *mut c_char,
-}
-
-#[repr(C)]
-struct ModuleInfo {
-    base: usize,
-    size: i32,
-    is_64bit: bool,
-    modulename: *mut c_char,
-}
-
 lazy_static! {
     static ref GLOBAL_POSITIONS: RwLock<HashMap<String, Vec<(usize, String)>>> =
         RwLock::new(HashMap::new());
     static ref GLOBAL_MEMORY: RwLock<HashMap<String, Vec<(usize, Vec<u8>, usize, Vec<u8>, usize, bool)>>> =
         RwLock::new(HashMap::new());
-    static ref GLOBAL_SCAN_OPTION: RwLock<HashMap<String, MemoryScanRequest>> =
+    static ref GLOBAL_SCAN_OPTION: RwLock<HashMap<String, request::MemoryScanRequest>> =
         RwLock::new(HashMap::new());
 }
 
@@ -145,163 +103,24 @@ pub async fn server_info_handler() -> Result<impl warp::Reply, warp::Rejection> 
     Ok(warp::reply::json(&server_info))
 }
 
-#[derive(Deserialize)]
-pub struct OpenProcess {
-    pid: i32,
-}
-
 pub async fn open_process_handler(
     pid_state: Arc<Mutex<Option<i32>>>,
-    open_process: OpenProcess,
+    open_process: request::OpenProcessRequest,
 ) -> Result<impl warp::Reply, warp::Rejection> {
     let mut pid = pid_state.lock().unwrap();
     *pid = Some(open_process.pid);
     Ok(warp::reply::with_status("OK", warp::http::StatusCode::OK))
 }
 
-fn read_memory_64(pid: i32, address: u64) -> Result<u64, String> {
-    let mut buffer = [0u8; 8];
-    read_process_memory(pid, address as *mut libc::c_void, 8, &mut buffer).map_err(|e| {
-        format!(
-            "Failed to read 64-bit memory at address {:#x}: {}",
-            address, e
-        )
-    })?;
-    Ok(u64::from_le_bytes(buffer))
-}
-
-fn _read_memory_32(pid: i32, address: u32) -> Result<u32, String> {
-    let mut buffer = [0u8; 4];
-    read_process_memory(pid, address as *mut libc::c_void, 4, &mut buffer).map_err(|e| {
-        format!(
-            "Failed to read 32-bit memory at address {:#x}: {}",
-            address, e
-        )
-    })?;
-    Ok(u32::from_le_bytes(buffer))
-}
-
-fn _evaluate_expression(expr: &str) -> Result<isize, String> {
-    let re = regex::Regex::new(r"(\d+)\s*([+\-*/])\s*(\d+)").unwrap();
-    if let Some(caps) = re.captures(expr) {
-        let a: isize = caps[1]
-            .parse()
-            .map_err(|_| "Invalid number in expression".to_string())?;
-        let b: isize = caps[3]
-            .parse()
-            .map_err(|_| "Invalid number in expression".to_string())?;
-        match &caps[2] {
-            "+" => Ok(a + b),
-            "-" => Ok(a - b),
-            "*" => Ok(a * b),
-            "/" => Ok(a / b),
-            _ => Err("Unsupported operation".to_string()),
-        }
-    } else {
-        expr.parse().map_err(|_| "Invalid expression".to_string())
-    }
-}
-
-fn resolve_nested_address(
-    pid: i32,
-    nested_addr: &str,
-    modules: &Vec<serde_json::Value>,
-) -> Result<u64, String> {
-    let re =
-        regex::Regex::new(r"(\[)|(\])|([^\[\]]+)").map_err(|e| format!("Regex error: {}", e))?;
-    let mut stack = Vec::new();
-    let mut current_expr = String::new();
-
-    for cap in re.captures_iter(nested_addr) {
-        if let Some(_) = cap.get(1) {
-            if !current_expr.is_empty() {
-                stack.push(current_expr);
-                current_expr = String::new();
-            }
-            current_expr.push('[');
-        } else if let Some(_) = cap.get(2) {
-            if !current_expr.is_empty() {
-                let inner_value = resolve_single_level_address(&current_expr, modules)?;
-                let memory_value = read_memory_64(pid, inner_value)?;
-                if let Some(mut prev_expr) = stack.pop() {
-                    prev_expr.push_str(&format!("0x{:X}", memory_value));
-                    current_expr = prev_expr;
-                } else {
-                    current_expr = format!("0x{:X}", memory_value);
-                }
-            }
-            current_expr.push(']');
-        } else if let Some(m) = cap.get(3) {
-            current_expr.push_str(m.as_str());
-        }
-    }
-
-    resolve_single_level_address(&current_expr, modules)
-}
-
-fn resolve_single_level_address(
-    addr: &str,
-    modules: &Vec<serde_json::Value>,
-) -> Result<u64, String> {
-    let re = regex::Regex::new(r"([-+])?(?:\s*)((?:\w|-)+(?:\.\w+)*|\d+|0x[\da-fA-F]+)")
-        .map_err(|e| format!("Regex error: {}", e))?;
-    let mut current_address: u64 = 0;
-    let mut first_item = true;
-
-    for cap in re.captures_iter(addr) {
-        let op = cap.get(1).map_or("+", |m| m.as_str());
-        let part = cap.get(2).unwrap().as_str();
-
-        let value = if let Some(module_info) = modules.iter().find(|m| {
-            m["modulename"]
-                .as_str()
-                .map_or(false, |name| part.eq_ignore_ascii_case(name))
-        }) {
-            let base = module_info["base"].as_u64().ok_or("Invalid base address")?;
-            base
-        } else {
-            u64::from_str_radix(part.trim_start_matches("0x"), 16)
-                .map_err(|_| format!("Invalid number: {}", part))?
-        };
-
-        if first_item {
-            current_address = value;
-            first_item = false;
-        } else {
-            match op {
-                "+" => current_address = current_address.wrapping_add(value),
-                "-" => current_address = current_address.wrapping_sub(value),
-                _ => return Err(format!("Invalid operation: {}", op)),
-            }
-        }
-    }
-
-    Ok(current_address)
-}
-
-fn resolve_symbolic_address(
-    pid: i32,
-    symbolic_addr: &str,
-    modules: &Vec<serde_json::Value>,
-) -> Result<usize, String> {
-    let resolved = resolve_nested_address(pid, symbolic_addr, modules)?;
-    Ok(resolved as usize)
-}
-
-#[derive(Deserialize)]
-pub struct ResolveAddrRequest {
-    query: String,
-}
-
 pub async fn resolve_addr_handler(
     pid_state: Arc<Mutex<Option<i32>>>,
-    resolve_addr: ResolveAddrRequest,
+    resolve_addr: request::ResolveAddrRequest,
 ) -> Result<impl warp::Reply, warp::Rejection> {
     let pid = pid_state.lock().unwrap();
 
     if let Some(pid) = *pid {
-        let modules = enum_modules(pid).unwrap();
-        match resolve_symbolic_address(pid, &resolve_addr.query, &modules) {
+        let modules = native_bridge::enum_modules(pid).unwrap();
+        match util::resolve_symbolic_address(pid, &resolve_addr.query, &modules) {
             Ok(resolved_address) => {
                 let result = json!({ "address": resolved_address });
                 let result_string = result.to_string();
@@ -331,21 +150,15 @@ pub async fn resolve_addr_handler(
     }
 }
 
-#[derive(Deserialize)]
-pub struct ReadMemoryRequest {
-    address: usize,
-    size: usize,
-}
-
 pub async fn read_memory_handler(
     pid_state: Arc<Mutex<Option<i32>>>,
-    read_memory: ReadMemoryRequest,
+    read_memory: request::ReadMemoryRequest,
 ) -> Result<impl warp::Reply, warp::Rejection> {
     let pid = pid_state.lock().unwrap();
 
     if let Some(pid) = *pid {
         let mut buffer: Vec<u8> = vec![0; read_memory.size];
-        let nread = read_process_memory(
+        let nread = native_bridge::read_process_memory(
             pid,
             read_memory.address as *mut libc::c_void,
             read_memory.size,
@@ -379,7 +192,7 @@ pub async fn read_memory_handler(
 
 pub async fn read_memory_multiple_handler(
     pid_state: Arc<Mutex<Option<i32>>>,
-    read_memory_requests: Vec<ReadMemoryRequest>,
+    read_memory_requests: Vec<request::ReadMemoryRequest>,
 ) -> Result<impl warp::Reply, warp::Rejection> {
     let pid = pid_state.lock().unwrap();
     if let Some(pid) = *pid {
@@ -387,7 +200,7 @@ pub async fn read_memory_multiple_handler(
             .par_iter()
             .map(|request| {
                 let mut buffer: Vec<u8> = vec![0; request.size];
-                let nread = read_process_memory(
+                let nread = native_bridge::read_process_memory(
                     pid,
                     request.address as *mut libc::c_void,
                     request.size,
@@ -431,20 +244,14 @@ pub async fn read_memory_multiple_handler(
     }
 }
 
-#[derive(Deserialize)]
-pub struct WriteMemoryRequest {
-    address: usize,
-    buffer: Vec<u8>,
-}
-
 pub async fn write_memory_handler(
     pid_state: Arc<Mutex<Option<i32>>>,
-    write_memory: WriteMemoryRequest,
+    write_memory: request::WriteMemoryRequest,
 ) -> Result<impl warp::Reply, warp::Rejection> {
     let pid = pid_state.lock().unwrap();
 
     if let Some(pid) = *pid {
-        let nwrite = write_process_memory(
+        let nwrite = native_bridge::write_process_memory(
             pid,
             write_memory.address as *mut libc::c_void,
             write_memory.buffer.len(),
@@ -475,21 +282,9 @@ pub async fn write_memory_handler(
     }
 }
 
-#[derive(Deserialize, Clone)]
-pub struct MemoryScanRequest {
-    pattern: String,
-    address_ranges: Vec<(usize, usize)>,
-    find_type: String,
-    data_type: String,
-    scan_id: String,
-    align: usize,
-    return_as_json: bool,
-    do_suspend: bool,
-}
-
 pub async fn memory_scan_handler(
     pid_state: Arc<Mutex<Option<i32>>>,
-    scan_request: MemoryScanRequest,
+    scan_request: request::MemoryScanRequest,
 ) -> Result<impl warp::Reply, warp::Rejection> {
     let pid = pid_state.lock().unwrap();
 
@@ -498,7 +293,7 @@ pub async fn memory_scan_handler(
     if let Some(pid) = *pid {
         if do_suspend {
             unsafe {
-                is_suspend_success = suspend_process(pid);
+                is_suspend_success = native_bridge::suspend_process(pid);
             }
         }
         // Clear global_positions for the given scan_id
@@ -542,7 +337,7 @@ pub async fn memory_scan_handler(
                         let mut local_positions = vec![];
                         let mut local_values = vec![];
 
-                        let nread = match read_process_memory(
+                        let nread = match native_bridge::read_process_memory(
                             pid,
                             chunk_start as *mut libc::c_void,
                             chunk_size_actual,
@@ -660,7 +455,7 @@ pub async fn memory_scan_handler(
 
         if do_suspend && is_suspend_success {
             unsafe {
-                resume_process(pid);
+                native_bridge::resume_process(pid);
             }
         }
         // println!("{}", found_count.load(Ordering::SeqCst));
@@ -757,19 +552,9 @@ macro_rules! compare_values {
     };
 }
 
-#[derive(Deserialize)]
-pub struct MemoryFilterRequest {
-    pattern: String,
-    data_type: String,
-    scan_id: String,
-    filter_method: String,
-    return_as_json: bool,
-    do_suspend: bool,
-}
-
 pub async fn memory_filter_handler(
     pid_state: Arc<Mutex<Option<i32>>>,
-    filter_request: MemoryFilterRequest,
+    filter_request: request::MemoryFilterRequest,
 ) -> Result<impl warp::Reply, warp::Rejection> {
     let pid = pid_state.lock().unwrap();
 
@@ -780,7 +565,7 @@ pub async fn memory_filter_handler(
         let mut global_positions = GLOBAL_POSITIONS.write().unwrap();
         let mut global_memory = GLOBAL_MEMORY.write().unwrap();
         let global_scan_option = GLOBAL_SCAN_OPTION.write().unwrap();
-        let scan_option: MemoryScanRequest = global_scan_option
+        let scan_option: request::MemoryScanRequest = global_scan_option
             .get(&filter_request.scan_id)
             .unwrap()
             .clone();
@@ -795,7 +580,7 @@ pub async fn memory_filter_handler(
         if let Some(memory) = global_memory.get_mut(&filter_request.scan_id) {
             if do_suspend {
                 unsafe {
-                    is_suspend_success = suspend_process(pid);
+                    is_suspend_success = native_bridge::suspend_process(pid);
                 }
             }
             let scan_align = scan_option.align;
@@ -813,7 +598,7 @@ pub async fn memory_filter_handler(
                     lz4::block::decompress(compressed_data, Some(*uncompressed_data_size as i32))
                         .unwrap();
                 let mut buffer: Vec<u8> = vec![0; (decompressed_data.len()) as usize];
-                let _nread = match read_process_memory(
+                let _nread = match native_bridge::read_process_memory(
                     pid,
                     *address as *mut libc::c_void,
                     decompressed_data.len(),
@@ -953,14 +738,14 @@ pub async fn memory_filter_handler(
         } else if let Some(positions) = global_positions.get(&filter_request.scan_id) {
             if do_suspend {
                 unsafe {
-                    is_suspend_success = suspend_process(pid);
+                    is_suspend_success = native_bridge::suspend_process(pid);
                 }
             }
             let results: Result<Vec<_>, _> = positions
                 .par_iter()
                 .map(|(address, value)| {
                     let mut buffer: Vec<u8> = vec![0; (value.len() / 2) as usize];
-                    let _nread = match read_process_memory(
+                    let _nread = match native_bridge::read_process_memory(
                         pid,
                         *address as *mut libc::c_void,
                         filter_request.pattern.len(),
@@ -1172,7 +957,7 @@ pub async fn memory_filter_handler(
                 Err(response) => {
                     if do_suspend && is_suspend_success {
                         unsafe {
-                            resume_process(pid);
+                            native_bridge::resume_process(pid);
                         }
                     }
                     return Ok(response);
@@ -1187,7 +972,7 @@ pub async fn memory_filter_handler(
         }
         if do_suspend && is_suspend_success {
             unsafe {
-                resume_process(pid);
+                native_bridge::resume_process(pid);
             }
         }
         global_positions.insert(filter_request.scan_id.clone(), new_positions.clone());
@@ -1246,36 +1031,6 @@ pub async fn memory_filter_handler(
     }
 }
 
-fn read_process_memory(
-    pid: i32,
-    address: *mut libc::c_void,
-    size: usize,
-    buffer: &mut [u8],
-) -> Result<isize, Error> {
-    let result =
-        unsafe { read_memory_native(pid, address as libc::uintptr_t, size, buffer.as_mut_ptr()) };
-    if result >= 0 {
-        Ok(result as isize)
-    } else {
-        Err(Error::last_os_error())
-    }
-}
-
-fn write_process_memory(
-    pid: i32,
-    address: *mut libc::c_void,
-    size: usize,
-    buffer: &[u8],
-) -> Result<isize, Error> {
-    let result =
-        unsafe { write_memory_native(pid, address as libc::uintptr_t, size, buffer.as_ptr()) };
-    if result >= 0 {
-        Ok(result as isize)
-    } else {
-        Err(Error::last_os_error())
-    }
-}
-
 #[derive(Serialize)]
 struct Region {
     start_address: String,
@@ -1293,7 +1048,7 @@ pub async fn enumerate_regions_handler(
         let mut buffer = vec![0u8; 1024 * 1024];
 
         unsafe {
-            enumerate_regions_to_buffer(pid, buffer.as_mut_ptr(), buffer.len());
+            native_bridge::enumerate_regions_to_buffer(pid, buffer.as_mut_ptr(), buffer.len());
         }
         let buffer_cstring = unsafe { CString::from_vec_unchecked(buffer) };
         let buffer_string = buffer_cstring.into_string().unwrap();
@@ -1342,7 +1097,7 @@ pub async fn enumerate_regions_handler(
 
 pub async fn enumerate_process_handler() -> Result<impl Reply, Rejection> {
     let mut count: usize = 0;
-    let process_info_ptr = unsafe { enumprocess_native(&mut count) };
+    let process_info_ptr = unsafe { native_bridge::enumprocess_native(&mut count) };
     let process_info_slice = unsafe { std::slice::from_raw_parts(process_info_ptr, count) };
 
     let mut json_array = Vec::new();
@@ -1361,7 +1116,7 @@ pub async fn enumerate_process_handler() -> Result<impl Reply, Rejection> {
 
     // for cdylib
     if count == 0 {
-        let pid = unsafe { get_pid_native() };
+        let pid = unsafe { native_bridge::get_pid_native() };
         json_array.push(json!({
             "pid": pid,
             "processname": "self".to_string()
@@ -1376,46 +1131,12 @@ pub async fn enumerate_process_handler() -> Result<impl Reply, Rejection> {
     Ok(json_response)
 }
 
-fn enum_modules(pid: i32) -> Result<Vec<serde_json::Value>, String> {
-    let mut count: usize = 0;
-    let module_info_ptr = unsafe { enummodule_native(pid, &mut count) };
-
-    if module_info_ptr.is_null() {
-        return Err("Failed to enumerate modules".to_string());
-    }
-
-    let module_info_slice = unsafe { std::slice::from_raw_parts(module_info_ptr, count) };
-
-    let mut modules = Vec::new();
-
-    for info in module_info_slice {
-        let module_name = unsafe {
-            CStr::from_ptr(info.modulename)
-                .to_string_lossy()
-                .into_owned()
-        };
-
-        modules.push(json!({
-            "base": info.base,
-            "size": info.size,
-            "is_64bit": info.is_64bit,
-            "modulename": module_name
-        }));
-
-        unsafe { libc::free(info.modulename as *mut libc::c_void) };
-    }
-
-    unsafe { libc::free(module_info_ptr as *mut libc::c_void) };
-
-    Ok(modules)
-}
-
 pub async fn enummodule_handler(
     pid_state: Arc<Mutex<Option<i32>>>,
 ) -> Result<impl warp::Reply, warp::Rejection> {
     let pid = pid_state.lock().unwrap();
     if let Some(pid) = *pid {
-        let modules = enum_modules(pid).unwrap();
+        let modules = native_bridge::enum_modules(pid).unwrap();
         let result = json!({ "modules": modules });
         let result_string = result.to_string();
         let response = Response::builder()
@@ -1431,23 +1152,9 @@ pub async fn enummodule_handler(
         Ok(response)
     }
 }
-#[derive(Deserialize)]
-pub struct ExploreDirectoryRequest {
-    path: String,
-    max_depth: i32,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct FileItem {
-    item_type: String,
-    name: String,
-    size: Option<i64>,
-    last_opened: Option<i64>,
-    children: Option<Vec<FileItem>>,
-}
 
 pub async fn explore_directory_handler(
-    req: ExploreDirectoryRequest,
+    req: request::ExploreDirectoryRequest,
 ) -> Result<impl Reply, Rejection> {
     let decoded_path = percent_decode_str(&req.path)
         .decode_utf8_lossy()
@@ -1468,7 +1175,7 @@ pub async fn explore_directory_handler(
     };
 
     let result = panic::catch_unwind(|| unsafe {
-        let result_ptr = explore_directory(c_path.as_ptr(), req.max_depth as c_int);
+        let result_ptr = native_bridge::explore_directory(c_path.as_ptr(), req.max_depth as c_int);
         if result_ptr.is_null() {
             return Err("Null pointer returned from explore_directory");
         }
@@ -1512,7 +1219,7 @@ pub async fn explore_directory_handler(
         ));
     }
 
-    match panic::catch_unwind(|| parse_directory_structure(&result)) {
+    match panic::catch_unwind(|| util::parse_directory_structure(&result)) {
         Ok(items) => Ok(warp::reply::with_status(
             warp::reply::json(&items),
             warp::http::StatusCode::OK,
@@ -1528,87 +1235,7 @@ pub async fn explore_directory_handler(
     }
 }
 
-fn parse_directory_structure(raw_data: &str) -> Vec<FileItem> {
-    let mut root_items = Vec::new(); // A vector to store root-level items
-    let mut stack: Vec<*mut FileItem> = Vec::new(); // A stack to manage the hierarchy, using raw pointers to avoid multiple mutable borrow issues
-
-    for line in raw_data.lines() {
-        // Calculate the indentation level by counting leading spaces and dividing by 2
-        let indent = line.chars().take_while(|&c| c == ' ').count() / 2;
-        let content = line.trim_start(); // Remove leading spaces from the line
-
-        // Determine if the line represents a directory or file by splitting at the colon
-        if let Some((item_type, rest)) = content.split_once(':') {
-            let new_item = match item_type {
-                "dir" => FileItem {
-                    item_type: "directory".to_string(),
-                    name: rest.to_string(),
-                    size: None,
-                    last_opened: None,
-                    children: None, // Initially set to None
-                },
-                "file" => {
-                    // Split the file line by commas to extract file name, size, and timestamp
-                    let parts: Vec<&str> = rest.split(',').collect();
-                    if parts.len() == 3 {
-                        FileItem {
-                            item_type: "file".to_string(),
-                            name: parts[0].to_string(),
-                            size: parts[1].parse().ok(), // Parse size as an integer
-                            last_opened: parts[2].parse().ok(), // Parse timestamp as an integer
-                            children: None,              // Files don't have children
-                        }
-                    } else {
-                        continue; // Skip invalid file lines
-                    }
-                }
-                _ => continue, // Skip unknown types
-            };
-
-            // Adjust the stack based on the indentation level (pop off if too deep)
-            while stack.len() > indent {
-                stack.pop();
-            }
-
-            if stack.is_empty() {
-                // If the stack is empty, we're at the root level
-                root_items.push(new_item);
-                // Push directory onto the stack if it has children
-                if item_type == "dir" {
-                    let last_ptr = root_items.last_mut().unwrap() as *mut FileItem;
-                    stack.push(last_ptr);
-                }
-            } else {
-                // If we're inside a directory, add the new item to the parent's children
-                unsafe {
-                    let parent = stack.last_mut().unwrap();
-                    if let Some(children) = &mut (**parent).children {
-                        children.push(new_item);
-                    } else {
-                        // Initialize children only when the directory has children
-                        (**parent).children = Some(vec![new_item]);
-                    }
-
-                    // Push directory onto the stack if it has children
-                    if item_type == "dir" {
-                        let last_ptr = (**parent).children.as_mut().unwrap().last_mut().unwrap()
-                            as *mut FileItem;
-                        stack.push(last_ptr);
-                    }
-                }
-            }
-        }
-    }
-
-    root_items
-}
-
-#[derive(Deserialize)]
-pub struct ReadFileRequest {
-    path: String,
-}
-
-pub async fn read_file_handler(req: ReadFileRequest) -> Result<Response<Body>, Rejection> {
+pub async fn read_file_handler(req: request::ReadFileRequest) -> Result<Response<Body>, Rejection> {
     let decoded_path = percent_decode_str(&req.path)
         .decode_utf8_lossy()
         .into_owned();
@@ -1618,7 +1245,7 @@ pub async fn read_file_handler(req: ReadFileRequest) -> Result<Response<Body>, R
     let mut error_ptr: *mut c_char = std::ptr::null_mut();
 
     let data_ptr = unsafe {
-        read_file(
+        native_bridge::read_file(
             c_path.as_ptr(),
             &mut size as *mut usize,
             &mut error_ptr as *mut *mut c_char,
@@ -1656,7 +1283,7 @@ pub async fn get_app_info_handler(
     let pid = pid_state.lock().unwrap();
     if let Some(pid) = *pid {
         let result = unsafe {
-            let raw_ptr = get_application_info(pid as c_int);
+            let raw_ptr = native_bridge::get_application_info(pid as c_int);
             if raw_ptr.is_null() {
                 return Ok(warp::reply::with_status(
                     warp::reply::json(&json!({"error": "Failed to get application info"})),
@@ -1694,8 +1321,90 @@ pub async fn get_app_info_handler(
     }
 }
 
-pub fn native_api_init(mode: i32) {
-    unsafe {
-        native_init(mode);
+pub async fn set_watchpoint_handler(
+    pid_state: Arc<Mutex<Option<i32>>>,
+    watchpoint: request::SetWatchPointRequest,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    let pid = pid_state.lock().unwrap();
+
+    if let Some(pid) = *pid {
+        let _type = match watchpoint._type.as_str() {
+            "r" => 1,
+            "w" => 2,
+            "a" => 3,
+            _ => {
+                return Ok(warp::reply::with_status(
+                    warp::reply::json(&request::SetWatchPointResponse {
+                        success: false,
+                        message: format!("Unknown type"),
+                    }),
+                    StatusCode::BAD_REQUEST,
+                ))
+            }
+        };
+        let result = native_bridge::set_watchpoint(pid, watchpoint.address, watchpoint.size, _type);
+
+        let ret = match result {
+            Ok(_) => Ok(warp::reply::with_status(
+                warp::reply::json(&request::SetWatchPointResponse {
+                    success: true,
+                    message: "Watchpoint set successfully".to_string(),
+                }),
+                StatusCode::OK,
+            )),
+            Err(e) => Ok(warp::reply::with_status(
+                warp::reply::json(&request::SetWatchPointResponse {
+                    success: false,
+                    message: format!("Failed to set watchpoint. Error: {}", e),
+                }),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )),
+        };
+        return ret;
+    } else {
+        Ok(warp::reply::with_status(
+            warp::reply::json(&request::SetWatchPointResponse {
+                success: false,
+                message: format!("Pid not set"),
+            }),
+            StatusCode::BAD_REQUEST,
+        ))
+    }
+}
+
+pub async fn remove_watchpoint_handler(
+    pid_state: Arc<Mutex<Option<i32>>>,
+    watchpoint: request::RemoveWatchPointRequest,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    let pid = pid_state.lock().unwrap();
+
+    if let Some(pid) = *pid {
+        let result = native_bridge::remove_watchpoint(pid, watchpoint.address);
+
+        let ret = match result {
+            Ok(_) => Ok(warp::reply::with_status(
+                warp::reply::json(&request::RemoveWatchPointResponse {
+                    success: true,
+                    message: "Remove Watchpoint set successfully".to_string(),
+                }),
+                StatusCode::OK,
+            )),
+            Err(e) => Ok(warp::reply::with_status(
+                warp::reply::json(&request::RemoveWatchPointResponse {
+                    success: false,
+                    message: format!("Failed to remove watchpoint. Error: {}", e),
+                }),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )),
+        };
+        return ret;
+    } else {
+        Ok(warp::reply::with_status(
+            warp::reply::json(&request::RemoveWatchPointResponse {
+                success: false,
+                message: format!("Pid not set"),
+            }),
+            StatusCode::BAD_REQUEST,
+        ))
     }
 }

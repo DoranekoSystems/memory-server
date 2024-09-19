@@ -123,3 +123,35 @@ export async function resolveAddress(ipAddress: String, query: String) {
     console.error("Error in resolveAddress:", error);
   }
 }
+
+export async function setWatchPoint(
+  ipAddress: string,
+  address: number,
+  size: number,
+  type: string
+) {
+  try {
+    const response = await axios.post(`http://${ipAddress}:3030/watchpoint`, {
+      address,
+      size,
+      _type: type,
+    });
+
+    if (response.status === 200) {
+      const result = response.data;
+      if (result.success) {
+        console.log("Watchpoint set successfully:", result.message);
+        return true;
+      } else {
+        console.error("Failed to set watchpoint:", result.message);
+        return false;
+      }
+    } else {
+      console.error("Unexpected status code:", response.status);
+      return false;
+    }
+  } catch (error) {
+    console.error("Error in setWatchPoint:", error);
+    return false;
+  }
+}

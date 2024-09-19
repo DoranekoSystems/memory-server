@@ -20,6 +20,15 @@ import {
   TextField,
   Button,
   ButtonGroup,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  FormControlLabel,
+  FormControl,
+  FormLabel,
+  Radio,
+  RadioGroup,
 } from "@mui/material";
 import { styled } from "@mui/system";
 import { tableCellClasses } from "@mui/material/TableCell";
@@ -29,6 +38,9 @@ import {
   Edit as EditIcon,
   Save as SaveIcon,
   Cancel as CancelIcon,
+  BugReport as BugReportIcon,
+  Done as DoneIcon,
+  Check as CheckIcon,
 } from "@mui/icons-material";
 import axios from "axios";
 import {
@@ -37,7 +49,7 @@ import {
   convertFromLittleEndianHex,
 } from "@/lib/converter";
 import { isHexadecimal } from "@/lib/utils";
-import { readProcessMemory, resolveAddress } from "@/lib/api";
+import { readProcessMemory, resolveAddress, setWatchPoint } from "@/lib/api";
 import { useStore } from "@/lib/global-store";
 
 const theme = createTheme({
@@ -97,7 +109,9 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
   const [editedType, setEditedType] = useState("");
   const [editedValue, setEditedValue] = useState("");
   const [editedBase, setEditedBase] = useState({});
-
+  const [open, setOpen] = useState(false);
+  const [selectedSize, setSelectedSize] = useState("1");
+  const [selectedType, setSelectedType] = useState("r");
   const isRowFrozen = useCallback(
     (index) => frozenRows[index] || false,
     [frozenRows]
@@ -269,6 +283,17 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
     setEditingIndex(null);
   };
 
+  const handleSetWatchPoint = async (event, index) => {
+    const address = bookMarkLists[index].address;
+    await setWatchPoint(
+      ipAddress,
+      address,
+      parseInt(selectedSize),
+      selectedType
+    );
+    setOpen(false);
+  };
+
   const handleSave = async (event, index) => {
     event.stopPropagation();
     const updatedBookmark = { ...bookMarkLists[index] };
@@ -279,7 +304,6 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
       valueToConvert = parseInt(editedValue, 16).toString();
     }
 
-    // Convert the edited value to little endian hex
     const buffer = new ArrayBuffer(
       getByteLengthFromScanType(editedType, valueToConvert)
     );
@@ -322,8 +346,6 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
     }
 
     updatedBookmark.value = arrayBufferToLittleEndianHexString(buffer);
-
-    // Update the memory
     try {
       let resolveAddr = updatedBookmark.address;
       if (!isHexadecimal(updatedBookmark.query)) {
@@ -514,6 +536,19 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
                             <EditIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
+                        <Tooltip title="Watch">
+                          <IconButton
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              {
+                                setOpen(true);
+                              }
+                            }}
+                            size="small"
+                          >
+                            <BugReportIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
                         <Tooltip title="Delete">
                           <IconButton
                             onClick={(e) => {
@@ -524,7 +559,90 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
                           >
                             <DeleteIcon fontSize="small" />
                           </IconButton>
-                        </Tooltip>
+                        </Tooltip>{" "}
+                        <Dialog open={open} onClose={() => {}}>
+                          <DialogTitle>
+                            Select watchpoint size and type
+                          </DialogTitle>
+                          <DialogContent>
+                            <FormControl component="fieldset">
+                              <FormLabel component="legend">Size</FormLabel>
+                              <RadioGroup
+                                value={selectedSize}
+                                onChange={(e) =>
+                                  setSelectedSize(e.target.value)
+                                }
+                              >
+                                <FormControlLabel
+                                  value="1"
+                                  control={<Radio />}
+                                  label="1"
+                                />
+                                <FormControlLabel
+                                  value="2"
+                                  control={<Radio />}
+                                  label="2"
+                                />
+                                <FormControlLabel
+                                  value="4"
+                                  control={<Radio />}
+                                  label="4"
+                                />
+                                <FormControlLabel
+                                  value="8"
+                                  control={<Radio />}
+                                  label="8"
+                                />
+                              </RadioGroup>
+
+                              <FormLabel component="legend">Type</FormLabel>
+                              <RadioGroup
+                                value={selectedType}
+                                onChange={(e) =>
+                                  setSelectedType(e.target.value)
+                                }
+                              >
+                                <FormControlLabel
+                                  value="r"
+                                  control={<Radio />}
+                                  label="Read"
+                                />
+                                <FormControlLabel
+                                  value="w"
+                                  control={<Radio />}
+                                  label="Write"
+                                />
+                                <FormControlLabel
+                                  value="a"
+                                  control={<Radio />}
+                                  label="Access"
+                                />
+                              </RadioGroup>
+                            </FormControl>
+                          </DialogContent>
+                          <DialogActions>
+                            <Tooltip title="Set">
+                              <IconButton
+                                onClick={(e) => handleSetWatchPoint(e, index)}
+                                size="small"
+                              >
+                                <CheckIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Cancel">
+                              <IconButton
+                                onClick={(e) => {
+                                  {
+                                    setOpen(false);
+                                  }
+                                }}
+                                size="small"
+                              >
+                                <CancelIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </DialogActions>
+                        </Dialog>
                       </>
                     )}
                   </StyledTableCell>

@@ -48,6 +48,12 @@ export function Header({ changePage }): any {
         </button>
         <button
           className="text-sm font-medium hover:underline underline-offset-4"
+          onClick={() => changePage("memoryview")}
+        >
+          Debugger
+        </button>
+        <button
+          className="text-sm font-medium hover:underline underline-offset-4"
           onClick={() => changePage("information")}
         >
           Information

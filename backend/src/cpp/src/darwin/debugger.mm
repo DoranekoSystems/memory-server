@@ -2,7 +2,7 @@
 
 extern "C"
 {
-    boolean_t exc_server(mach_msg_header_t *InHeadP, mach_msg_header_t *OutHeadP);
+    boolean_t exc_server(mach_msg_header_t* InHeadP, mach_msg_header_t* OutHeadP);
 }
 
 __attribute__((used)) extern "C" kern_return_t catch_exception_raise(
@@ -17,12 +17,19 @@ __attribute__((used)) extern "C" kern_return_t catch_exception_raise(
     return KERN_FAILURE;
 }
 
+Debugger* g_debugger = nullptr;
+
 Debugger::Debugger(pid_t pid)
     : pid_(pid),
       task_port_(MACH_PORT_NULL),
       exception_port_(MACH_PORT_NULL),
       watchpoint_used(MAX_WATCHPOINTS, false),
-      watchpoint_addresses(MAX_WATCHPOINTS, 0)
+      watchpoint_addresses(MAX_WATCHPOINTS, 0),
+      watchpoint_sizes(MAX_WATCHPOINTS, 0),
+      breakpoint_used(MAX_BREAKPOINTS, false),
+      breakpoint_addresses(MAX_BREAKPOINTS, 0),
+      breakpoint_hit_counts(MAX_BREAKPOINTS, 0),
+      breakpoint_target_counts(MAX_BREAKPOINTS, 0)
 {
 }
 
@@ -115,6 +122,7 @@ kern_return_t Debugger::set_watchpoint(mach_vm_address_t address, int size, Watc
     {
         watchpoint_used[index] = true;
         watchpoint_addresses[index] = address;
+        watchpoint_sizes[index] = size;
         std::cout << "Watchpoint set successfully at address 0x" << std::hex << address << std::dec
                   << std::endl;
     }
@@ -164,6 +172,7 @@ kern_return_t Debugger::remove_watchpoint(mach_vm_address_t address)
     {
         watchpoint_used[index] = false;
         watchpoint_addresses[index] = 0;
+        watchpoint_sizes[index] = 0;
         std::cout << "Watchpoint removed successfully from address 0x" << std::hex << address
                   << std::dec << std::endl;
     }
@@ -179,6 +188,415 @@ kern_return_t Debugger::remove_watchpoint(mach_vm_address_t address)
     vm_deallocate(mach_task_self(), (vm_address_t)thread_list, thread_count * sizeof(thread_act_t));
 
     return kr;
+}
+
+kern_return_t Debugger::set_breakpoint(mach_vm_address_t address, int hit_count)
+{
+    thread_act_array_t thread_list;
+    mach_msg_type_number_t thread_count;
+    kern_return_t kr;
+
+    kr = task_threads(task_port_, &thread_list, &thread_count);
+    if (kr != KERN_SUCCESS || thread_count == 0)
+    {
+        std::cerr << "Failed to get threads: " << kern_return_to_string(kr) << std::endl;
+        return kr;
+    }
+
+    int index = find_free_breakpoint();
+    if (index == -1)
+    {
+        std::cerr << "No free breakpoints available." << std::endl;
+        return KERN_NO_SPACE;
+    }
+
+    arm_debug_state64_t debug_state = {0};
+    mach_msg_type_number_t count = ARM_DEBUG_STATE64_COUNT;
+    kr = thread_get_state(thread_list[0], ARM_DEBUG_STATE64, (thread_state_t)&debug_state, &count);
+    if (kr != KERN_SUCCESS)
+    {
+        std::cerr << "Failed to get debug state: " << kern_return_to_string(kr) << std::endl;
+        return kr;
+    }
+
+    debug_state.__bvr[index] = address;
+    debug_state.__bcr[index] = (1ULL << 0) | (2ULL << 1) | (1ULL << 5);  // Enable, EL1, all sizes
+    debug_state.__mdscr_el1 |= (1ULL << 15);                             // Enable debug
+
+    kr = thread_set_state(thread_list[0], ARM_DEBUG_STATE64, (thread_state_t)&debug_state, count);
+    if (kr == KERN_SUCCESS)
+    {
+        breakpoint_used[index] = true;
+        breakpoint_addresses[index] = address;
+        breakpoint_hit_counts[index] = 0;
+        breakpoint_target_counts[index] = hit_count;
+        std::cout << "Breakpoint set successfully at address 0x" << std::hex << address << std::dec
+                  << std::endl;
+    }
+    else
+    {
+        std::cerr << "Failed to set breakpoint: " << kern_return_to_string(kr) << std::endl;
+    }
+
+    for (mach_msg_type_number_t i = 0; i < thread_count; i++)
+    {
+        mach_port_deallocate(mach_task_self(), thread_list[i]);
+    }
+    vm_deallocate(mach_task_self(), (vm_address_t)thread_list, thread_count * sizeof(thread_act_t));
+
+    return kr;
+}
+
+kern_return_t Debugger::remove_breakpoint(mach_vm_address_t address)
+{
+    thread_act_array_t thread_list;
+    mach_msg_type_number_t thread_count;
+    kern_return_t kr;
+
+    kr = task_threads(task_port_, &thread_list, &thread_count);
+    if (kr != KERN_SUCCESS || thread_count == 0)
+    {
+        std::cerr << "Failed to get threads: " << kern_return_to_string(kr) << std::endl;
+        return kr;
+    }
+
+    int index = find_breakpoint_index(address);
+    if (index == -1)
+    {
+        std::cerr << "Breakpoint not found for address: 0x" << std::hex << address << std::dec
+                  << std::endl;
+        return KERN_INVALID_ARGUMENT;
+    }
+
+    arm_debug_state64_t debug_state = {0};
+    mach_msg_type_number_t count = ARM_DEBUG_STATE64_COUNT;
+    kr = thread_get_state(thread_list[0], ARM_DEBUG_STATE64, (thread_state_t)&debug_state, &count);
+    if (kr != KERN_SUCCESS)
+    {
+        std::cerr << "Failed to get debug state: " << kern_return_to_string(kr) << std::endl;
+        return kr;
+    }
+
+    debug_state.__bcr[index] = 0;  // Disable the breakpoint
+    kr = thread_set_state(thread_list[0], ARM_DEBUG_STATE64, (thread_state_t)&debug_state, count);
+    if (kr == KERN_SUCCESS)
+    {
+        breakpoint_used[index] = false;
+        breakpoint_addresses[index] = 0;
+        breakpoint_hit_counts[index] = 0;
+        breakpoint_target_counts[index] = 0;
+        std::cout << "Breakpoint removed successfully from address 0x" << std::hex << address
+                  << std::dec << std::endl;
+    }
+    else
+    {
+        std::cerr << "Failed to remove breakpoint: " << kern_return_to_string(kr) << std::endl;
+    }
+
+    for (mach_msg_type_number_t i = 0; i < thread_count; i++)
+    {
+        mach_port_deallocate(mach_task_self(), thread_list[i]);
+    }
+    vm_deallocate(mach_task_self(), (vm_address_t)thread_list, thread_count * sizeof(thread_act_t));
+
+    return kr;
+}
+
+kern_return_t Debugger::handle_exception(mach_port_t exception_port, mach_port_t thread,
+                                         mach_port_t task, exception_type_t exception,
+                                         mach_exception_data_t code,
+                                         mach_msg_type_number_t code_count)
+{
+    if (exception != EXC_BREAKPOINT && exception != EXC_GUARD)
+    {
+        return KERN_FAILURE;
+    }
+
+    arm_thread_state64_t thread_state;
+    mach_msg_type_number_t thread_state_count = ARM_THREAD_STATE64_COUNT;
+    kern_return_t kr = thread_get_state(thread, ARM_THREAD_STATE64, (thread_state_t)&thread_state,
+                                        &thread_state_count);
+    if (kr != KERN_SUCCESS)
+    {
+        std::cerr << "Failed to get thread state: " << mach_error_string(kr) << std::endl;
+        return kr;
+    }
+
+    arm_debug_state64_t debug_state;
+    mach_msg_type_number_t debug_state_count = ARM_DEBUG_STATE64_COUNT;
+    kr = thread_get_state(thread, ARM_DEBUG_STATE64, (thread_state_t)&debug_state,
+                          &debug_state_count);
+    if (kr != KERN_SUCCESS)
+    {
+        std::cerr << "Failed to get debug state: " << mach_error_string(kr) << std::endl;
+        return kr;
+    }
+
+    arm_exception_state64_t exception_state;
+    mach_msg_type_number_t exception_state_count = ARM_EXCEPTION_STATE64_COUNT;
+    kr = thread_get_state(thread, ARM_EXCEPTION_STATE64, (thread_state_t)&exception_state,
+                          &exception_state_count);
+    if (kr != KERN_SUCCESS)
+    {
+        std::cerr << "Failed to get exception state: " << mach_error_string(kr) << std::endl;
+        return kr;
+    }
+
+    std::vector<std::map<std::string, uint64_t>> map_vector;
+    for (int i = 0; i < 30; ++i)
+    {
+        map_vector.push_back({{"x" + std::to_string(i), thread_state.__x[i]}});
+    }
+    map_vector.push_back({{"lr", thread_state.__lr}});
+    map_vector.push_back({{"fp", thread_state.__fp}});
+    map_vector.push_back({{"sp", thread_state.__sp}});
+    map_vector.push_back({{"pc", thread_state.__pc}});
+    map_vector.push_back({{"cpsr", thread_state.__cpsr}});
+
+    if (single_step_mode != SingleStepMode::None)
+    {
+        std::string register_json = map_vector_to_json_string(map_vector);
+        send_register_json(register_json.c_str(), pid_);
+        return handle_single_step(thread, debug_state, thread_state, exception_state);
+    }
+
+    uint32_t esr = exception_state.__esr;
+    uint32_t ec = (esr >> 26) & 0x3F;  // Exception Class
+
+    if (ec == 0x34 || ec == 0x35)
+    {
+        uint64_t far = exception_state.__far;
+        map_vector.push_back({{"memory", far}});
+
+        for (int i = 0; i < MAX_WATCHPOINTS; i++)
+        {
+            if (watchpoint_used[i] && far >= watchpoint_addresses[i] &&
+                far < watchpoint_addresses[i] + watchpoint_sizes[i])
+            {
+                std::string register_json = map_vector_to_json_string(map_vector);
+                send_register_json(register_json.c_str(), pid_);
+                return handle_watchpoint_hit(thread, debug_state, thread_state, exception_state, i);
+            }
+        }
+    }
+    else if (ec == 0x30 || ec == 0x31)  // It's a breakpoint
+    {
+        for (int i = 0; i < MAX_BREAKPOINTS; i++)
+        {
+            if (breakpoint_used[i] && thread_state.__pc == breakpoint_addresses[i])
+            {
+                std::string register_json = map_vector_to_json_string(map_vector);
+                send_register_json(register_json.c_str(), pid_);
+
+                std::cout << __LINE__ << std::endl;
+                // onetime breakpoint
+                debug_state.__bcr[i] = 0;  // Disable the breakpoint
+                return handle_breakpoint_hit(thread, debug_state, thread_state, exception_state, i);
+            }
+        }
+    }
+
+    return KERN_FAILURE;
+}
+
+kern_return_t Debugger::handle_single_step(mach_port_t thread, arm_debug_state64_t& debug_state,
+                                           arm_thread_state64_t& thread_state,
+                                           arm_exception_state64_t& exception_state)
+{
+    switch (single_step_mode)
+    {
+        case SingleStepMode::Watchpoint:
+            return complete_watchpoint_single_step(thread, debug_state, thread_state,
+                                                   exception_state);
+        case SingleStepMode::Breakpoint:
+            return continue_breakpoint_single_step(thread, debug_state, thread_state,
+                                                   exception_state);
+        default:
+            return KERN_FAILURE;
+    }
+}
+
+kern_return_t Debugger::complete_watchpoint_single_step(mach_port_t thread,
+                                                        arm_debug_state64_t& debug_state,
+                                                        arm_thread_state64_t& thread_state,
+                                                        arm_exception_state64_t& exception_state)
+{
+    // Re-enable the watchpoint
+    debug_state.__wcr[0] |= 1ULL << 0;
+
+    // Disable single-step mode
+    debug_state.__mdscr_el1 &= ~1ULL;
+
+    kern_return_t kr = thread_set_state(thread, ARM_DEBUG_STATE64, (thread_state_t)&debug_state,
+                                        ARM_DEBUG_STATE64_COUNT);
+    if (kr != KERN_SUCCESS)
+    {
+        std::cerr << "Failed to restore debug state: " << mach_error_string(kr) << std::endl;
+        return kr;
+    }
+
+    single_step_mode = SingleStepMode::None;
+    return KERN_SUCCESS;
+}
+
+kern_return_t Debugger::continue_breakpoint_single_step(mach_port_t thread,
+                                                        arm_debug_state64_t& debug_state,
+                                                        arm_thread_state64_t& thread_state,
+                                                        arm_exception_state64_t& exception_state)
+{
+    single_step_count++;
+    if (single_step_count >= breakpoint_target_counts[current_breakpoint_index] + 1)
+    {
+        single_step_mode = SingleStepMode::None;
+        single_step_count = 0;
+        breakpoint_used[current_breakpoint_index] = false;
+        breakpoint_addresses[current_breakpoint_index] = 0;
+        breakpoint_hit_counts[current_breakpoint_index] = 0;
+        breakpoint_target_counts[current_breakpoint_index] = 0;
+        return KERN_SUCCESS;
+    }
+
+    // Continue single-stepping
+    debug_state.__mdscr_el1 |= 1ULL;
+    kern_return_t kr = thread_set_state(thread, ARM_DEBUG_STATE64, (thread_state_t)&debug_state,
+                                        ARM_DEBUG_STATE64_COUNT);
+    if (kr != KERN_SUCCESS)
+    {
+        std::cerr << "Failed to set single-step mode: " << mach_error_string(kr) << std::endl;
+        return kr;
+    }
+
+    return KERN_SUCCESS;
+}
+
+kern_return_t Debugger::handle_watchpoint_hit(mach_port_t thread, arm_debug_state64_t& debug_state,
+                                              arm_thread_state64_t& thread_state,
+                                              arm_exception_state64_t& exception_state,
+                                              int watchpoint_index)
+{
+    std::cout << "Watchpoint hit at address 0x" << std::hex << exception_state.__far << std::dec
+              << " (Watchpoint index: " << watchpoint_index << ")" << std::endl;
+
+    // Temporarily disable the watchpoint
+    debug_state.__wcr[watchpoint_index] &= ~(1ULL << 0);
+
+    // Enable single-step mode
+    debug_state.__mdscr_el1 |= 1ULL;
+
+    kern_return_t kr = thread_set_state(thread, ARM_DEBUG_STATE64, (thread_state_t)&debug_state,
+                                        ARM_DEBUG_STATE64_COUNT);
+    if (kr != KERN_SUCCESS)
+    {
+        std::cerr << "Failed to set debug state: " << mach_error_string(kr) << std::endl;
+        return kr;
+    }
+
+    single_step_mode = SingleStepMode::Watchpoint;
+    return KERN_SUCCESS;
+}
+
+kern_return_t Debugger::handle_breakpoint_hit(mach_port_t thread, arm_debug_state64_t& debug_state,
+                                              arm_thread_state64_t& thread_state,
+                                              arm_exception_state64_t& exception_state,
+                                              int breakpoint_index)
+{
+    breakpoint_hit_counts[breakpoint_index]++;
+    std::cout << "Breakpoint hit at address 0x" << std::hex
+              << breakpoint_addresses[breakpoint_index] << std::dec
+              << " (Hit count: " << breakpoint_hit_counts[breakpoint_index] << ")" << std::endl;
+
+    if (breakpoint_hit_counts[breakpoint_index] < breakpoint_target_counts[breakpoint_index])
+    {
+        single_step_mode = SingleStepMode::Breakpoint;
+        single_step_count = 0;
+        current_breakpoint_index = breakpoint_index;
+
+        // Enable single-step mode
+        debug_state.__mdscr_el1 |= 1ULL;
+        kern_return_t kr = thread_set_state(thread, ARM_DEBUG_STATE64, (thread_state_t)&debug_state,
+                                            ARM_DEBUG_STATE64_COUNT);
+        if (kr != KERN_SUCCESS)
+        {
+            std::cerr << "Failed to set single-step mode: " << mach_error_string(kr) << std::endl;
+            return kr;
+        }
+    }
+    else
+    {
+        remove_breakpoint(breakpoint_addresses[breakpoint_index]);
+    }
+
+    return KERN_SUCCESS;
+}
+
+int Debugger::find_free_watchpoint()
+{
+    for (int i = 0; i < MAX_WATCHPOINTS; i++)
+    {
+        if (!watchpoint_used[i])
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int Debugger::find_watchpoint_index(mach_vm_address_t address)
+{
+    for (int i = 0; i < MAX_WATCHPOINTS; i++)
+    {
+        if (watchpoint_used[i] && watchpoint_addresses[i] == address)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int Debugger::find_free_breakpoint()
+{
+    for (int i = 0; i < MAX_BREAKPOINTS; i++)
+    {
+        if (!breakpoint_used[i])
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int Debugger::find_breakpoint_index(mach_vm_address_t address)
+{
+    for (int i = 0; i < MAX_BREAKPOINTS; i++)
+    {
+        if (breakpoint_used[i] && breakpoint_addresses[i] == address)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int Debugger::get_available_watchpoints(mach_port_t thread)
+{
+    arm_debug_state64_t debug_state;
+    mach_msg_type_number_t count = ARM_DEBUG_STATE64_COUNT;
+    kern_return_t kr =
+        thread_get_state(thread, ARM_DEBUG_STATE64, (thread_state_t)&debug_state, &count);
+    if (kr != KERN_SUCCESS)
+    {
+        return MAX_WATCHPOINTS;
+    }
+
+    int available = 0;
+    for (int i = 0; i < MAX_WATCHPOINTS; i++)
+    {
+        if ((debug_state.__wcr[i] & 1) == 0)
+        {
+            available++;
+        }
+    }
+    return available;
 }
 
 kern_return_t Debugger::set_watchpoint_on_thread(mach_port_t thread, mach_vm_address_t address,
@@ -250,150 +668,66 @@ kern_return_t Debugger::set_watchpoint_on_thread(mach_port_t thread, mach_vm_add
     return kr;
 }
 
-kern_return_t Debugger::handle_exception(mach_port_t exception_port, mach_port_t thread,
-                                         mach_port_t task, exception_type_t exception,
-                                         mach_exception_data_t code,
-                                         mach_msg_type_number_t code_count)
-{
-    static bool is_single_stepping = false;
-
-    if (is_single_stepping)
-    {
-        is_single_stepping = false;
-        return handle_single_step(thread);
-    }
-
-    arm_thread_state64_t thread_state;
-    mach_msg_type_number_t thread_state_count = ARM_THREAD_STATE64_COUNT;
-    kern_return_t kr = thread_get_state(thread, ARM_THREAD_STATE64, (thread_state_t)&thread_state,
-                                        &thread_state_count);
-    if (kr != KERN_SUCCESS)
-    {
-        std::cerr << "Failed to get thread state: " << mach_error_string(kr) << std::endl;
-        return kr;
-    }
-
-    arm_debug_state64_t debug_state;
-    mach_msg_type_number_t count = ARM_DEBUG_STATE64_COUNT;
-    kr = thread_get_state(thread, ARM_DEBUG_STATE64, (thread_state_t)&debug_state, &count);
-    if (kr != KERN_SUCCESS)
-    {
-        std::cerr << "Failed to get debug state: " << mach_error_string(kr) << std::endl;
-        return kr;
-    }
-
-    arm_exception_state64_t exception_state;
-    mach_msg_type_number_t exception_state_count = ARM_EXCEPTION_STATE64_COUNT;
-    kr = thread_get_state(thread, ARM_EXCEPTION_STATE64, (thread_state_t)&exception_state,
-                          &exception_state_count);
-    if (kr != KERN_SUCCESS)
-    {
-        std::cerr << "Failed to get exception state: " << mach_error_string(kr) << std::endl;
-        return kr;
-    }
-
-    std::cout << "Watchpoint exception caught at PC: 0x" << std::hex << thread_state.__pc
-              << std::dec << std::endl;
-    std::cout << "Memory access at address: 0x" << std::hex << exception_state.__far << std::dec
-              << std::endl;
-
-    // Temporarily disable the watchpoint
-    uint64_t original_wcr = debug_state.__wcr[0];
-    debug_state.__wcr[0] &= ~(1ULL << 0);
-
-    // Enable single-step mode
-    debug_state.__mdscr_el1 |= 1;
-
-    kr = thread_set_state(thread, ARM_DEBUG_STATE64, (thread_state_t)&debug_state, count);
-    if (kr != KERN_SUCCESS)
-    {
-        std::cerr << "Failed to set debug state: " << mach_error_string(kr) << std::endl;
-        return kr;
-    }
-
-    is_single_stepping = true;
-
-    return KERN_SUCCESS;
-}
-
-kern_return_t Debugger::handle_single_step(mach_port_t thread)
-{
-    arm_debug_state64_t debug_state;
-    mach_msg_type_number_t count = ARM_DEBUG_STATE64_COUNT;
-    kern_return_t kr =
-        thread_get_state(thread, ARM_DEBUG_STATE64, (thread_state_t)&debug_state, &count);
-    if (kr != KERN_SUCCESS)
-    {
-        std::cerr << "Failed to get debug state after single step: " << mach_error_string(kr)
-                  << std::endl;
-        return kr;
-    }
-
-    // Disable single-step mode
-    debug_state.__mdscr_el1 &= ~1ULL;
-
-    // Re-enable the watchpoint
-    debug_state.__wcr[0] |= 1ULL << 0;
-
-    kr = thread_set_state(thread, ARM_DEBUG_STATE64, (thread_state_t)&debug_state, count);
-    if (kr != KERN_SUCCESS)
-    {
-        std::cerr << "Failed to restore debug state: " << mach_error_string(kr) << std::endl;
-        return kr;
-    }
-
-    std::cout << "Single step completed, watchpoint re-enabled." << std::endl;
-
-    return KERN_SUCCESS;
-}
-
-int Debugger::find_free_watchpoint()
-{
-    for (int i = 0; i < MAX_WATCHPOINTS; i++)
-    {
-        if (!watchpoint_used[i])
-        {
-            return i;
-        }
-    }
-    return -1;
-}
-
-int Debugger::find_watchpoint_index(mach_vm_address_t address)
-{
-    for (int i = 0; i < MAX_WATCHPOINTS; i++)
-    {
-        if (watchpoint_used[i] && watchpoint_addresses[i] == address)
-        {
-            return i;
-        }
-    }
-    return -1;
-}
-
-int Debugger::get_available_watchpoints(mach_port_t thread)
-{
-    arm_debug_state64_t debug_state;
-    mach_msg_type_number_t count = ARM_DEBUG_STATE64_COUNT;
-    kern_return_t kr =
-        thread_get_state(thread, ARM_DEBUG_STATE64, (thread_state_t)&debug_state, &count);
-    if (kr != KERN_SUCCESS)
-    {
-        return MAX_WATCHPOINTS;
-    }
-
-    int available = 0;
-    for (int i = 0; i < MAX_WATCHPOINTS; i++)
-    {
-        if ((debug_state.__wcr[i] & 1) == 0)
-        {
-            available++;
-        }
-    }
-    return available;
-}
-
 std::string Debugger::kern_return_to_string(kern_return_t kr)
 {
     return mach_error_string(kr);
+}
+
+extern "C"
+{
+    bool debugger_new(pid_t pid)
+    {
+        if (g_debugger == nullptr)
+        {
+            g_debugger = new Debugger(pid);
+            if (g_debugger->initialize())
+            {
+                std::thread([&]() { g_debugger->run(); }).detach();
+                return true;
+            }
+            else
+            {
+                delete g_debugger;
+                g_debugger = nullptr;
+                return false;
+            }
+        }
+        return true;
+    }
+
+    kern_return_t set_watchpoint_native(mach_vm_address_t address, int size, WatchpointType type)
+    {
+        if (g_debugger)
+        {
+            return g_debugger->set_watchpoint(address, size, type);
+        }
+        return KERN_FAILURE;
+    }
+
+    kern_return_t remove_watchpoint_native(mach_vm_address_t address)
+    {
+        if (g_debugger)
+        {
+            return g_debugger->remove_watchpoint(address);
+        }
+        return KERN_FAILURE;
+    }
+
+    kern_return_t set_breakpoint_native(mach_vm_address_t address, int hit_count)
+    {
+        if (g_debugger)
+        {
+            return g_debugger->set_breakpoint(address, hit_count);
+        }
+        return KERN_FAILURE;
+    }
+
+    kern_return_t remove_breakpoint_native(mach_vm_address_t address)
+    {
+        if (g_debugger)
+        {
+            return g_debugger->remove_breakpoint(address);
+        }
+        return KERN_FAILURE;
+    }
 }

@@ -16,7 +16,7 @@ pub async fn serve(mode: i32, host: IpAddr, port: u16) {
     let cors = warp::cors()
         .allow_any_origin()
         .allow_headers(vec!["*", "Content-Type"])
-        .allow_methods(vec!["GET", "POST", "OPTIONS"]);
+        .allow_methods(vec!["GET", "POST", "DELETE", "OPTIONS"]);
 
     let static_files = warp::path::tail()
         .map(|tail: Tail| tail.as_str().to_string())
@@ -132,6 +132,26 @@ pub async fn serve(mode: i32, host: IpAddr, port: u16) {
             api::remove_watchpoint_handler(pid_state, remove_watchpoint_request).await
         });
 
+    let set_breakpoint = warp::path!("breakpoint")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(api::with_state(pid_state.clone()))
+        .and_then(|set_breakpoint_request, pid_state| async move {
+            api::set_breakpoint_handler(pid_state, set_breakpoint_request).await
+        });
+
+    let remove_breakpoint = warp::path!("breakpoint")
+        .and(warp::delete())
+        .and(warp::body::json())
+        .and(api::with_state(pid_state.clone()))
+        .and_then(|remove_breakpoint_request, pid_state| async move {
+            api::remove_breakpoint_handler(pid_state, remove_breakpoint_request).await
+        });
+
+    let get_exception_info = warp::path!("exceptioninfo")
+        .and(warp::get())
+        .and_then(api::get_exception_info_handler);
+
     let routes = open_process
         .or(read_memory)
         .or(read_memory_multiple)
@@ -148,6 +168,9 @@ pub async fn serve(mode: i32, host: IpAddr, port: u16) {
         .or(server_info)
         .or(set_watchpoint)
         .or(remove_watchpoint)
+        .or(set_breakpoint)
+        .or(remove_breakpoint)
+        .or(get_exception_info)
         .or(static_files)
         .with(cors)
         .with(warp::log::custom(logger::http_log));

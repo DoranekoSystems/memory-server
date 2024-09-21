@@ -6,7 +6,7 @@ use log::LevelFilter;
 use std::io::Write;
 use warp::log::Info;
 
-static EXCLUDED_PATHS: &[&str] = &["/_next", "/readmemory"];
+static EXCLUDED_PATHS: &[&str] = &["/_next", "/readmemory", "/exceptioninfo"];
 static EXCLUDED_EXTENSIONS: &[&str] = &[
     ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".webp", ".bmp", ".tiff",
 ];

@@ -80,3 +80,26 @@ pub struct RemoveWatchPointResponse {
     pub success: bool,
     pub message: String,
 }
+
+#[derive(Deserialize)]
+pub struct SetBreakPointRequest {
+    pub address: usize,
+    pub hit_count: i32,
+}
+
+#[derive(Serialize)]
+pub struct SetBreakPointResponse {
+    pub success: bool,
+    pub message: String,
+}
+
+#[derive(Deserialize)]
+pub struct RemoveBreakPointRequest {
+    pub address: usize,
+}
+
+#[derive(Serialize)]
+pub struct RemoveBreakPointResponse {
+    pub success: bool,
+    pub message: String,
+}

@@ -50,7 +50,7 @@ import {
 } from "@/lib/converter";
 import { isHexadecimal } from "@/lib/utils";
 import { readProcessMemory, resolveAddress, setWatchPoint } from "@/lib/api";
-import { useStore } from "@/lib/global-store";
+import { useStore, useWatchpointStore } from "@/lib/global-store";
 
 const theme = createTheme({
   palette: {
@@ -291,6 +291,11 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
       parseInt(selectedSize),
       selectedType
     );
+    useWatchpointStore.getState().addWatchpoint({
+      address,
+      size: parseInt(selectedSize),
+      type: selectedType,
+    });
     setOpen(false);
   };
 

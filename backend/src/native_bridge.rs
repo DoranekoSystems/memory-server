@@ -67,6 +67,8 @@ extern "C" {
         _type: libc::c_int,
     ) -> libc::c_int;
     pub fn remove_watchpoint_native(address: libc::uintptr_t) -> libc::c_int;
+    pub fn set_breakpoint_native(address: usize, hit_count: i32) -> i32;
+    pub fn remove_breakpoint_native(address: usize) -> i32;
 }
 
 #[repr(C)]
@@ -134,6 +136,31 @@ pub fn remove_watchpoint(pid: i32, address: usize) -> Result<i32, Error> {
     let result = unsafe { remove_watchpoint_native(address) };
     if result == 0 {
         Ok(result as i32)
+    } else {
+        Err(Error::last_os_error())
+    }
+}
+
+pub fn set_breakpoint(pid: i32, address: usize, hit_count: i32) -> Result<i32, Error> {
+    let result: bool = unsafe { debugger_new(pid) };
+    if !result {
+        return Err(Error::new(
+            std::io::ErrorKind::Other,
+            "Failed to create debugger instance",
+        ));
+    }
+    let result = unsafe { set_breakpoint_native(address, hit_count) };
+    if result == 0 {
+        Ok(result)
+    } else {
+        Err(Error::last_os_error())
+    }
+}
+
+pub fn remove_breakpoint(pid: i32, address: usize) -> Result<i32, Error> {
+    let result = unsafe { remove_breakpoint_native(address) };
+    if result == 0 {
+        Ok(result)
     } else {
         Err(Error::last_os_error())
     }

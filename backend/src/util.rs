@@ -17,6 +17,10 @@ use std::env;
 use std::ffi::CStr;
 use std::ffi::CString;
 
+use crate::native_bridge;
+use capstone::arch::arm64::ArchMode;
+use capstone::prelude::*;
+use capstone::Syntax;
 use log::{debug, error, info, trace, warn};
 use std::io::Error;
 use std::io::{BufRead, BufReader};
@@ -27,8 +31,6 @@ use std::str;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::RwLock;
 use std::sync::{Arc, Mutex};
-
-use crate::native_bridge;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FileItem {
@@ -237,4 +239,27 @@ pub fn parse_directory_structure(raw_data: &str) -> Vec<FileItem> {
     }
 
     root_items
+}
+
+pub fn disassemble(bytecode: *const u8, length: usize, address: u64) -> String {
+    let bytes = unsafe { slice::from_raw_parts(bytecode, length) };
+    let cs = Capstone::new()
+        .arm64()
+        .mode(arch::arm64::ArchMode::Arm)
+        .detail(true)
+        .build()
+        .expect("Failed to create Capstone object");
+
+    let instructions = cs
+        .disasm_all(bytes, address)
+        .expect("Failed to disassemble");
+    let mut result = String::new();
+
+    for i in instructions.iter() {
+        let mnemonic = i.mnemonic().unwrap_or("");
+        let op_str = i.op_str().unwrap_or("");
+        result.push_str(&format!("{:#x}: {} {}\n", i.address(), mnemonic, op_str));
+    }
+
+    result
 }

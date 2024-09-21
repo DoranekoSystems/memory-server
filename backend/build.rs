@@ -59,6 +59,7 @@ fn main() {
             build.file("src/cpp/src/darwin/native_api.mm");
             build.file("src/cpp/src/darwin/file_api.mm");
             build.file("src/cpp/src/darwin/debugger.mm");
+            build.file("src/cpp/src/common/util.cpp");
         }
 
         "android" => {

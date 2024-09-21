@@ -1,6 +1,34 @@
-import { create } from 'zustand'
+import { create } from "zustand";
 
-interface globalState {
+type RegisterInfo = {
+  [key: string]: number;
+};
+
+type Watchpoint = {
+  address: number;
+  size: number;
+  type: string;
+};
+
+type WatchpointStore = {
+  watchpoints: Watchpoint[];
+  addWatchpoint: (watchpoint: Watchpoint) => void;
+  removeWatchpoint: (address: number) => void;
+};
+
+type Breakpoint = {
+  address: number;
+  hitCount: number;
+};
+
+type BreakpointStore = {
+  breakpoints: Breakpoint[];
+  addBreakpoint: (breakpoint: Breakpoint) => void;
+  removeBreakpoint: (address: number) => void;
+  updateBreakpointHitCount: (address: number, hitCount: number) => void;
+};
+
+interface GlobalState {
   ipAddress: string;
   setIpAddress: (ipAddress: string) => void;
   openProcessId: Number;
@@ -13,7 +41,7 @@ interface globalState {
   setTargetOS: (targetOS: string) => void;
 }
 
-export const useStore = create<globalState>((set) => ({
+export const useStore = create<GlobalState>((set) => ({
   ipAddress: "",
   setIpAddress: (ip: string) => set({ ipAddress: ip }),
   openProcessId: 0,
@@ -24,4 +52,34 @@ export const useStore = create<globalState>((set) => ({
   setServerMode: (mode: string) => set({ serverMode: mode }),
   targetOS: "",
   setTargetOS: (name: string) => set({ targetOS: name }),
+}));
+
+export const useWatchpointStore = create<WatchpointStore>((set) => ({
+  watchpoints: [],
+  addWatchpoint: (watchpoint) =>
+    set((state) => ({
+      watchpoints: [...state.watchpoints, watchpoint],
+    })),
+  removeWatchpoint: (address) =>
+    set((state) => ({
+      watchpoints: state.watchpoints.filter((wp) => wp.address !== address),
+    })),
+}));
+
+export const useBreakpointStore = create<BreakpointStore>((set) => ({
+  breakpoints: [],
+  addBreakpoint: (breakpoint) =>
+    set((state) => ({
+      breakpoints: [...state.breakpoints, breakpoint],
+    })),
+  removeBreakpoint: (address) =>
+    set((state) => ({
+      breakpoints: state.breakpoints.filter((bp) => bp.address !== address),
+    })),
+  updateBreakpointHitCount: (address, hitCount) =>
+    set((state) => ({
+      breakpoints: state.breakpoints.map((bp) =>
+        bp.address === address ? { ...bp, hitCount } : bp
+      ),
+    })),
 }));

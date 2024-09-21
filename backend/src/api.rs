@@ -13,11 +13,11 @@ use serde_json::json;
 use serde_json::Value;
 use std::collections::HashMap;
 
+use log::{debug, error, info, trace, warn};
+use std::collections::VecDeque;
 use std::env;
 use std::ffi::CStr;
 use std::ffi::CString;
-
-use log::{debug, error, info, trace, warn};
 use std::io::Error;
 use std::io::{BufRead, BufReader};
 use std::panic;
@@ -34,6 +34,16 @@ use crate::native_bridge;
 use crate::request;
 use crate::util;
 
+lazy_static! {
+    static ref GLOBAL_POSITIONS: RwLock<HashMap<String, Vec<(usize, String)>>> =
+        RwLock::new(HashMap::new());
+    static ref GLOBAL_MEMORY: RwLock<HashMap<String, Vec<(usize, Vec<u8>, usize, Vec<u8>, usize, bool)>>> =
+        RwLock::new(HashMap::new());
+    static ref GLOBAL_SCAN_OPTION: RwLock<HashMap<String, request::MemoryScanRequest>> =
+        RwLock::new(HashMap::new());
+    static ref JSON_QUEUE: Arc<Mutex<VecDeque<String>>> = Arc::new(Mutex::new(VecDeque::new()));
+}
+
 #[no_mangle]
 pub extern "C" fn native_log(level: c_int, message: *const c_char) {
     let log_message = unsafe { CStr::from_ptr(message).to_string_lossy().into_owned() };
@@ -48,13 +58,34 @@ pub extern "C" fn native_log(level: c_int, message: *const c_char) {
     }
 }
 
-lazy_static! {
-    static ref GLOBAL_POSITIONS: RwLock<HashMap<String, Vec<(usize, String)>>> =
-        RwLock::new(HashMap::new());
-    static ref GLOBAL_MEMORY: RwLock<HashMap<String, Vec<(usize, Vec<u8>, usize, Vec<u8>, usize, bool)>>> =
-        RwLock::new(HashMap::new());
-    static ref GLOBAL_SCAN_OPTION: RwLock<HashMap<String, request::MemoryScanRequest>> =
-        RwLock::new(HashMap::new());
+#[no_mangle]
+pub extern "C" fn send_register_json(register_json: *const c_char, pid: i32) {
+    let c_str = unsafe { CStr::from_ptr(register_json) };
+    let rust_str = c_str.to_str().unwrap();
+
+    let mut json_value: Value = serde_json::from_str(rust_str).unwrap();
+
+    let pc_address_hex = json_value["pc"]
+        .as_str()
+        .ok_or("Failed to get 'pc' value")
+        .unwrap();
+    let pc_address = u64::from_str_radix(pc_address_hex.trim_start_matches("0x"), 16).unwrap();
+
+    let mut buffer = [0u8; 4];
+    native_bridge::read_process_memory(
+        pid,
+        pc_address as *mut libc::c_void,
+        buffer.len(),
+        &mut buffer as &mut [u8],
+    )
+    .unwrap();
+
+    let disassembled = util::disassemble(buffer.as_ptr(), buffer.len(), pc_address);
+
+    json_value["instruction"] = json!(disassembled);
+
+    let mut queue = JSON_QUEUE.lock().unwrap();
+    queue.push_back(json_value.to_string());
 }
 
 pub fn with_state(
@@ -64,6 +95,16 @@ pub fn with_state(
 }
 
 const MAX_RESULTS: usize = 100_000;
+
+pub async fn get_exception_info_handler() -> Result<impl warp::Reply, warp::Rejection> {
+    let mut queue = JSON_QUEUE.lock().unwrap();
+    let exceptions: Vec<Value> = queue
+        .drain(..)
+        .filter_map(|json_str| serde_json::from_str(&json_str).ok())
+        .collect();
+
+    Ok(warp::reply::json(&exceptions))
+}
 
 #[derive(Serialize)]
 struct ServerInfo {
@@ -1401,6 +1442,76 @@ pub async fn remove_watchpoint_handler(
     } else {
         Ok(warp::reply::with_status(
             warp::reply::json(&request::RemoveWatchPointResponse {
+                success: false,
+                message: format!("Pid not set"),
+            }),
+            StatusCode::BAD_REQUEST,
+        ))
+    }
+}
+
+pub async fn set_breakpoint_handler(
+    pid_state: Arc<Mutex<Option<i32>>>,
+    breakpoint: request::SetBreakPointRequest,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    let pid = pid_state.lock().unwrap();
+    if let Some(pid) = *pid {
+        let result = native_bridge::set_breakpoint(pid, breakpoint.address, breakpoint.hit_count);
+        let ret = match result {
+            Ok(_) => Ok(warp::reply::with_status(
+                warp::reply::json(&request::SetBreakPointResponse {
+                    success: true,
+                    message: "Breakpoint set successfully".to_string(),
+                }),
+                StatusCode::OK,
+            )),
+            Err(e) => Ok(warp::reply::with_status(
+                warp::reply::json(&request::SetBreakPointResponse {
+                    success: false,
+                    message: format!("Failed to set breakpoint. Error: {}", e),
+                }),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )),
+        };
+        return ret;
+    } else {
+        Ok(warp::reply::with_status(
+            warp::reply::json(&request::SetBreakPointResponse {
+                success: false,
+                message: format!("Pid not set"),
+            }),
+            StatusCode::BAD_REQUEST,
+        ))
+    }
+}
+
+pub async fn remove_breakpoint_handler(
+    pid_state: Arc<Mutex<Option<i32>>>,
+    breakpoint: request::RemoveBreakPointRequest,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    let pid = pid_state.lock().unwrap();
+    if let Some(pid) = *pid {
+        let result = native_bridge::remove_breakpoint(pid, breakpoint.address);
+        let ret = match result {
+            Ok(_) => Ok(warp::reply::with_status(
+                warp::reply::json(&request::RemoveBreakPointResponse {
+                    success: true,
+                    message: "Breakpoint removed successfully".to_string(),
+                }),
+                StatusCode::OK,
+            )),
+            Err(e) => Ok(warp::reply::with_status(
+                warp::reply::json(&request::RemoveBreakPointResponse {
+                    success: false,
+                    message: format!("Failed to remove breakpoint. Error: {}", e),
+                }),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )),
+        };
+        return ret;
+    } else {
+        Ok(warp::reply::with_status(
+            warp::reply::json(&request::RemoveBreakPointResponse {
                 success: false,
                 message: format!("Pid not set"),
             }),

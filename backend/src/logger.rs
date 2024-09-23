@@ -22,7 +22,6 @@ pub fn init_log() {
                 log::Level::Debug => ("DEBUG", Color::Blue),
                 log::Level::Trace => ("TRACE", Color::Magenta),
             };
-
             let args = record.args().to_string();
             let colored_args = if args.contains("GET")
                 || args.contains("POST")
@@ -35,15 +34,14 @@ pub fn init_log() {
                         "{} {} {}",
                         parts[0].color(Color::Cyan),
                         parts[1].color(Color::Yellow),
-                        parts[2]
+                        color_native_prefix(parts[2])
                     )
                 } else {
-                    args
+                    color_native_prefix(&args)
                 }
             } else {
-                args
+                color_native_prefix(&args)
             };
-
             writeln!(
                 buf,
                 "{} [{}] {}",
@@ -58,6 +56,19 @@ pub fn init_log() {
         .filter_level(LevelFilter::Info)
         .parse_env(Env::default().default_filter_or("info"))
         .init();
+}
+
+fn color_native_prefix(message: &str) -> String {
+    if message.starts_with("[NATIVE]") {
+        let parts: Vec<&str> = message.splitn(2, ']').collect();
+        if parts.len() == 2 {
+            format!("{}{}", "[NATIVE]".color(Color::BrightRed), parts[1])
+        } else {
+            message.to_string()
+        }
+    } else {
+        message.to_string()
+    }
 }
 
 pub fn http_log(info: Info) {

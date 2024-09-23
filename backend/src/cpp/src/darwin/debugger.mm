@@ -52,14 +52,14 @@ bool Debugger::initialize()
     kr = task_for_pid(mach_task_self(), pid_, &task_port_);
     if (kr != KERN_SUCCESS)
     {
-        std::cerr << "task_for_pid failed: " << kern_return_to_string(kr) << std::endl;
+        debug_log(LOG_ERROR, "task_for_pid failed: %s", kern_return_to_string(kr).c_str());
         return false;
     }
 
     kr = mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &exception_port_);
     if (kr != KERN_SUCCESS)
     {
-        std::cerr << "mach_port_allocate failed: " << kern_return_to_string(kr) << std::endl;
+        debug_log(LOG_ERROR, "mach_port_allocate failed: %s", kern_return_to_string(kr).c_str());
         return false;
     }
 
@@ -67,7 +67,8 @@ bool Debugger::initialize()
                                 MACH_MSG_TYPE_MAKE_SEND);
     if (kr != KERN_SUCCESS)
     {
-        std::cerr << "mach_port_insert_right failed: " << kern_return_to_string(kr) << std::endl;
+        debug_log(LOG_ERROR, "mach_port_insert_right failed: %s",
+                  kern_return_to_string(kr).c_str());
         return false;
     }
 
@@ -75,11 +76,12 @@ bool Debugger::initialize()
                                   ARM_THREAD_STATE64);
     if (kr != KERN_SUCCESS)
     {
-        std::cerr << "task_set_exception_ports failed: " << kern_return_to_string(kr) << std::endl;
+        debug_log(LOG_ERROR, "task_set_exception_ports failed: %s",
+                  kern_return_to_string(kr).c_str());
         return false;
     }
 
-    std::cout << "Debugger initialized for process " << pid_ << std::endl;
+    debug_log(LOG_INFO, "Debugger initialized for process %d", pid_);
     return true;
 }
 
@@ -89,11 +91,11 @@ void Debugger::run()
 
     if (kr != KERN_SUCCESS)
     {
-        std::cerr << "mach_msg_server failed: " << kern_return_to_string(kr) << std::endl;
+        debug_log(LOG_ERROR, "mach_msg_server failed: %s", kern_return_to_string(kr).c_str());
     }
     else
     {
-        std::cout << "mach_msg_server succeeded." << std::endl;
+        debug_log(LOG_INFO, "mach_msg_server succeeded.");
     }
 }
 
@@ -106,14 +108,14 @@ kern_return_t Debugger::set_watchpoint(mach_vm_address_t address, int size, Watc
     kr = task_threads(task_port_, &thread_list, &thread_count);
     if (kr != KERN_SUCCESS || thread_count == 0)
     {
-        std::cerr << "Failed to get threads: " << kern_return_to_string(kr) << std::endl;
+        debug_log(LOG_ERROR, "Failed to get threads: ", kern_return_to_string(kr).c_str());
         return kr;
     }
 
     int index = find_free_watchpoint();
     if (index == -1)
     {
-        std::cerr << "No free watchpoints available." << std::endl;
+        debug_log(LOG_ERROR, "No free watchpoints available.");
         return KERN_NO_SPACE;
     }
 
@@ -123,8 +125,7 @@ kern_return_t Debugger::set_watchpoint(mach_vm_address_t address, int size, Watc
         watchpoint_used[index] = true;
         watchpoint_addresses[index] = address;
         watchpoint_sizes[index] = size;
-        std::cout << "Watchpoint set successfully at address 0x" << std::hex << address << std::dec
-                  << std::endl;
+        debug_log(LOG_INFO, "Watchpoint set successfully at address 0x%llx", address);
     }
 
     for (mach_msg_type_number_t i = 0; i < thread_count; i++)
@@ -145,15 +146,14 @@ kern_return_t Debugger::remove_watchpoint(mach_vm_address_t address)
     kr = task_threads(task_port_, &thread_list, &thread_count);
     if (kr != KERN_SUCCESS || thread_count == 0)
     {
-        std::cerr << "Failed to get threads: " << kern_return_to_string(kr) << std::endl;
+        debug_log(LOG_ERROR, "Failed to get threads: %s", kern_return_to_string(kr).c_str());
         return kr;
     }
 
     int index = find_watchpoint_index(address);
     if (index == -1)
     {
-        std::cerr << "Watchpoint not found for address: 0x" << std::hex << address << std::dec
-                  << std::endl;
+        debug_log(LOG_ERROR, "Watchpoint not found for address: 0x%llx", address);
         return KERN_INVALID_ARGUMENT;
     }
 
@@ -162,7 +162,7 @@ kern_return_t Debugger::remove_watchpoint(mach_vm_address_t address)
     kr = thread_get_state(thread_list[0], ARM_DEBUG_STATE64, (thread_state_t)&debug_state, &count);
     if (kr != KERN_SUCCESS)
     {
-        std::cerr << "Failed to get debug state: " << kern_return_to_string(kr) << std::endl;
+        debug_log(LOG_ERROR, "Failed to get debug state: %s", kern_return_to_string(kr).c_str());
         return kr;
     }
 
@@ -173,12 +173,11 @@ kern_return_t Debugger::remove_watchpoint(mach_vm_address_t address)
         watchpoint_used[index] = false;
         watchpoint_addresses[index] = 0;
         watchpoint_sizes[index] = 0;
-        std::cout << "Watchpoint removed successfully from address 0x" << std::hex << address
-                  << std::dec << std::endl;
+        debug_log(LOG_INFO, "Watchpoint removed successfully from address 0x%llx", address);
     }
     else
     {
-        std::cerr << "Failed to remove watchpoint: " << kern_return_to_string(kr) << std::endl;
+        debug_log(LOG_ERROR, "Failed to remove watchpoint: %s", kern_return_to_string(kr).c_str());
     }
 
     for (mach_msg_type_number_t i = 0; i < thread_count; i++)
@@ -199,14 +198,14 @@ kern_return_t Debugger::set_breakpoint(mach_vm_address_t address, int hit_count)
     kr = task_threads(task_port_, &thread_list, &thread_count);
     if (kr != KERN_SUCCESS || thread_count == 0)
     {
-        std::cerr << "Failed to get threads: " << kern_return_to_string(kr) << std::endl;
+        debug_log(LOG_ERROR, "Failed to get threads: %s", kern_return_to_string(kr).c_str());
         return kr;
     }
 
     int index = find_free_breakpoint();
     if (index == -1)
     {
-        std::cerr << "No free breakpoints available." << std::endl;
+        debug_log(LOG_ERROR, "No free breakpoints available.");
         return KERN_NO_SPACE;
     }
 
@@ -215,7 +214,7 @@ kern_return_t Debugger::set_breakpoint(mach_vm_address_t address, int hit_count)
     kr = thread_get_state(thread_list[0], ARM_DEBUG_STATE64, (thread_state_t)&debug_state, &count);
     if (kr != KERN_SUCCESS)
     {
-        std::cerr << "Failed to get debug state: " << kern_return_to_string(kr) << std::endl;
+        debug_log(LOG_ERROR, "Failed to get debug state: %s", kern_return_to_string(kr).c_str());
         return kr;
     }
 
@@ -230,12 +229,11 @@ kern_return_t Debugger::set_breakpoint(mach_vm_address_t address, int hit_count)
         breakpoint_addresses[index] = address;
         breakpoint_hit_counts[index] = 0;
         breakpoint_target_counts[index] = hit_count;
-        std::cout << "Breakpoint set successfully at address 0x" << std::hex << address << std::dec
-                  << std::endl;
+        debug_log(LOG_INFO, "Breakpoint set successfully at address 0x%llx", address);
     }
     else
     {
-        std::cerr << "Failed to set breakpoint: " << kern_return_to_string(kr) << std::endl;
+        debug_log(LOG_ERROR, "Failed to set breakpoint: %s", kern_return_to_string(kr).c_str());
     }
 
     for (mach_msg_type_number_t i = 0; i < thread_count; i++)
@@ -256,15 +254,14 @@ kern_return_t Debugger::remove_breakpoint(mach_vm_address_t address)
     kr = task_threads(task_port_, &thread_list, &thread_count);
     if (kr != KERN_SUCCESS || thread_count == 0)
     {
-        std::cerr << "Failed to get threads: " << kern_return_to_string(kr) << std::endl;
+        debug_log(LOG_ERROR, "Failed to get threads: %s", kern_return_to_string(kr).c_str());
         return kr;
     }
 
     int index = find_breakpoint_index(address);
     if (index == -1)
     {
-        std::cerr << "Breakpoint not found for address: 0x" << std::hex << address << std::dec
-                  << std::endl;
+        debug_log(LOG_ERROR, "Breakpoint not found for address: 0x%llx", address);
         return KERN_INVALID_ARGUMENT;
     }
 
@@ -273,7 +270,7 @@ kern_return_t Debugger::remove_breakpoint(mach_vm_address_t address)
     kr = thread_get_state(thread_list[0], ARM_DEBUG_STATE64, (thread_state_t)&debug_state, &count);
     if (kr != KERN_SUCCESS)
     {
-        std::cerr << "Failed to get debug state: " << kern_return_to_string(kr) << std::endl;
+        debug_log(LOG_ERROR, "Failed to get debug state: %s", kern_return_to_string(kr).c_str());
         return kr;
     }
 
@@ -285,12 +282,11 @@ kern_return_t Debugger::remove_breakpoint(mach_vm_address_t address)
         breakpoint_addresses[index] = 0;
         breakpoint_hit_counts[index] = 0;
         breakpoint_target_counts[index] = 0;
-        std::cout << "Breakpoint removed successfully from address 0x" << std::hex << address
-                  << std::dec << std::endl;
+        debug_log(LOG_INFO, "Breakpoint removed successfully from address 0x%llx", address);
     }
     else
     {
-        std::cerr << "Failed to remove breakpoint: " << kern_return_to_string(kr) << std::endl;
+        debug_log(LOG_ERROR, "Failed to remove breakpoint: %s", kern_return_to_string(kr).c_str());
     }
 
     for (mach_msg_type_number_t i = 0; i < thread_count; i++)
@@ -318,7 +314,7 @@ kern_return_t Debugger::handle_exception(mach_port_t exception_port, mach_port_t
                                         &thread_state_count);
     if (kr != KERN_SUCCESS)
     {
-        std::cerr << "Failed to get thread state: " << mach_error_string(kr) << std::endl;
+        debug_log(LOG_ERROR, "Failed to get thread state: %s", mach_error_string(kr));
         return kr;
     }
 
@@ -328,7 +324,7 @@ kern_return_t Debugger::handle_exception(mach_port_t exception_port, mach_port_t
                           &debug_state_count);
     if (kr != KERN_SUCCESS)
     {
-        std::cerr << "Failed to get debug state: " << mach_error_string(kr) << std::endl;
+        debug_log(LOG_ERROR, "Failed to get debug state: %s", mach_error_string(kr));
         return kr;
     }
 
@@ -338,7 +334,7 @@ kern_return_t Debugger::handle_exception(mach_port_t exception_port, mach_port_t
                           &exception_state_count);
     if (kr != KERN_SUCCESS)
     {
-        std::cerr << "Failed to get exception state: " << mach_error_string(kr) << std::endl;
+        debug_log(LOG_ERROR, "Failed to get exception state: %s", mach_error_string(kr));
         return kr;
     }
 
@@ -429,7 +425,7 @@ kern_return_t Debugger::complete_watchpoint_single_step(mach_port_t thread,
                                         ARM_DEBUG_STATE64_COUNT);
     if (kr != KERN_SUCCESS)
     {
-        std::cerr << "Failed to restore debug state: " << mach_error_string(kr) << std::endl;
+        debug_log(LOG_ERROR, "Failed to restore debug state: %s", mach_error_string(kr));
         return kr;
     }
 
@@ -460,7 +456,7 @@ kern_return_t Debugger::continue_breakpoint_single_step(mach_port_t thread,
                                         ARM_DEBUG_STATE64_COUNT);
     if (kr != KERN_SUCCESS)
     {
-        std::cerr << "Failed to set single-step mode: " << mach_error_string(kr) << std::endl;
+        debug_log(LOG_ERROR, "Failed to set single-step mode: %s", mach_error_string(kr));
         return kr;
     }
 
@@ -472,9 +468,6 @@ kern_return_t Debugger::handle_watchpoint_hit(mach_port_t thread, arm_debug_stat
                                               arm_exception_state64_t& exception_state,
                                               int watchpoint_index)
 {
-    std::cout << "Watchpoint hit at address 0x" << std::hex << exception_state.__far << std::dec
-              << " (Watchpoint index: " << watchpoint_index << ")" << std::endl;
-
     // Temporarily disable the watchpoint
     debug_state.__wcr[watchpoint_index] &= ~(1ULL << 0);
 
@@ -485,7 +478,7 @@ kern_return_t Debugger::handle_watchpoint_hit(mach_port_t thread, arm_debug_stat
                                         ARM_DEBUG_STATE64_COUNT);
     if (kr != KERN_SUCCESS)
     {
-        std::cerr << "Failed to set debug state: " << mach_error_string(kr) << std::endl;
+        debug_log(LOG_ERROR, "Failed to set debug state: %s", mach_error_string(kr));
         return kr;
     }
 
@@ -499,9 +492,6 @@ kern_return_t Debugger::handle_breakpoint_hit(mach_port_t thread, arm_debug_stat
                                               int breakpoint_index)
 {
     breakpoint_hit_counts[breakpoint_index]++;
-    std::cout << "Breakpoint hit at address 0x" << std::hex
-              << breakpoint_addresses[breakpoint_index] << std::dec
-              << " (Hit count: " << breakpoint_hit_counts[breakpoint_index] << ")" << std::endl;
 
     if (breakpoint_hit_counts[breakpoint_index] < breakpoint_target_counts[breakpoint_index])
     {
@@ -515,7 +505,7 @@ kern_return_t Debugger::handle_breakpoint_hit(mach_port_t thread, arm_debug_stat
                                             ARM_DEBUG_STATE64_COUNT);
         if (kr != KERN_SUCCESS)
         {
-            std::cerr << "Failed to set single-step mode: " << mach_error_string(kr) << std::endl;
+            debug_log(LOG_ERROR, "Failed to set single-step mode: %s", mach_error_string(kr));
             return kr;
         }
     }
@@ -607,7 +597,8 @@ kern_return_t Debugger::set_watchpoint_on_thread(mach_port_t thread, mach_vm_add
         thread_get_state(thread, ARM_DEBUG_STATE64, (thread_state_t)&debug_state, &count);
     if (kr != KERN_SUCCESS)
     {
-        std::cerr << "Failed to get thread debug state: " << kern_return_to_string(kr) << std::endl;
+        debug_log(LOG_ERROR, "Failed to get thread debug state: %s",
+                  kern_return_to_string(kr).c_str());
         return kr;
     }
 
@@ -644,7 +635,7 @@ kern_return_t Debugger::set_watchpoint_on_thread(mach_port_t thread, mach_vm_add
             len_field = 3;
             break;
         default:
-            std::cerr << "Invalid watchpoint size" << std::endl;
+            debug_log(LOG_ERROR, "Invalid watchpoint size");
             return KERN_INVALID_ARGUMENT;
     }
     control |= (len_field << 5);
@@ -660,7 +651,7 @@ kern_return_t Debugger::set_watchpoint_on_thread(mach_port_t thread, mach_vm_add
     kr = thread_set_state(thread, ARM_DEBUG_STATE64, (thread_state_t)&debug_state, count);
     if (kr != KERN_SUCCESS)
     {
-        std::cerr << "thread_set_state failed: " << kern_return_to_string(kr) << std::endl;
+        debug_log(LOG_ERROR, "thread_set_state failed: %s", kern_return_to_string(kr).c_str());
     }
 
     return kr;

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 
 import {
   useStore,
@@ -74,6 +74,7 @@ export function Debugger({ currentPage }) {
   const [breakpointData, setBreakpointData] = useState([]);
   const [isVisible, setIsVisible] = useState(currentPage === "debugger");
   const [activeTab, setActiveTab] = useState(0);
+  const deletionTimeoutRef = useRef(null);
 
   useEffect(() => {
     setIsVisible(currentPage === "debugger");
@@ -155,7 +156,6 @@ export function Debugger({ currentPage }) {
                   .split(/\s+/);
                 const mnemonic = instructionParts[0];
                 const operands = instructionParts.slice(1).join(" ");
-
                 const newBreakpointEntry = {
                   address: pcAddress,
                   hits: newHitCount,
@@ -163,7 +163,6 @@ export function Debugger({ currentPage }) {
                   operands: operands,
                   register: registerInfo,
                 };
-
                 return [...prevData, newBreakpointEntry];
               });
             }
@@ -174,8 +173,15 @@ export function Debugger({ currentPage }) {
       }
     };
 
-    const intervalId = setInterval(pollException, 100);
-    return () => clearInterval(intervalId);
+    let intervalId;
+
+    if (!deletionTimeoutRef.current) {
+      intervalId = setInterval(pollException, 100);
+    }
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
   }, [
     ipAddress,
     watchpoints,
@@ -215,6 +221,7 @@ export function Debugger({ currentPage }) {
                 <Box className="overflow-y-auto max-h-[700px]">
                   {Object.values(watchpointData).map((data: any) => (
                     <WatchPointTable
+                      ref={deletionTimeoutRef}
                       key={data.address.toString()}
                       watchpointData={data}
                       onDelete={handleDeleteWatchpoint}

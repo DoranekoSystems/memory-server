@@ -1,4 +1,5 @@
 import React from "react";
+import { useState, useEffect, useRef, forwardRef } from "react";
 import {
   Table,
   TableBody,
@@ -15,7 +16,6 @@ import { styled } from "@mui/system";
 import { Theme } from "@mui/material/styles";
 import DeleteIcon from "@mui/icons-material/Delete";
 import { useStore, useWatchpointStore } from "@/lib/global-store";
-import { removeWatchPoint } from "@/lib/api";
 
 const StyledTableContainer = styled(TableContainer)(({ theme }) => ({
   maxHeight: "70vh",
@@ -38,7 +38,7 @@ const StyledTableCell = styled(TableCell)<{ theme?: Theme }>(({ theme }) => ({
   color: theme?.palette?.common?.white || "#ffffff",
 }));
 
-const WatchPointTable = ({ watchpointData, onDelete }) => {
+const WatchPointTable = forwardRef(({ watchpointData, onDelete }, ref) => {
   const memoryApi = useStore((state) => state.memoryApi);
   const ipAddress = useStore((state) => state.ipAddress);
   const _removeWatchpoint = useWatchpointStore(
@@ -46,15 +46,28 @@ const WatchPointTable = ({ watchpointData, onDelete }) => {
   );
 
   const handleDelete = async () => {
-    const ret = await memoryApi.removeWatchPoint(
-      Number(watchpointData.address)
-    );
+    const address = Number(watchpointData.address);
+    if (ref.current) {
+      clearTimeout(ref.current);
+    }
+
+    _removeWatchpoint(address);
+    onDelete(address);
+    const ret = await memoryApi.removeWatchPoint(Number(address));
+
     if (ret.success) {
-      _removeWatchpoint(watchpointData.address);
-      onDelete(watchpointData.address);
+      _removeWatchpoint(address);
+
+      ref.current = setTimeout(() => {
+        ref.current = null;
+      }, 1000);
     } else if (ret.status == 500) {
-      _removeWatchpoint(watchpointData.address);
-      onDelete(watchpointData.address);
+      console.error("Failed to remove watchpoint");
+      _removeWatchpoint(address);
+
+      ref.current = setTimeout(() => {
+        ref.current = null;
+      }, 1000);
     }
   };
 
@@ -117,6 +130,6 @@ const WatchPointTable = ({ watchpointData, onDelete }) => {
       </StyledTableContainer>
     </Paper>
   );
-};
+});
 
 export default WatchPointTable;

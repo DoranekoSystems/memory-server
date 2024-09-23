@@ -26,6 +26,7 @@ import {
 } from "@/lib/converter";
 
 import { isHexadecimal } from "@/lib/utils";
+import { resolve } from "path";
 
 export function Bookmark({ currentPage }) {
   const memoryApi = useStore((state) => state.memoryApi);
@@ -133,10 +134,10 @@ export function Bookmark({ currentPage }) {
 
   const handleAddNewBookmark = async () => {
     let resolveAddr = newAddress.trim();
-    if (!isHexadecimal(newAddress)) {
-      let ret = await memoryApi.resolveAddress(newAddress);
+    if (!isHexadecimal(resolveAddr)) {
+      let ret = await memoryApi.resolveAddress(resolveAddr);
       if (ret.success) {
-        resolveAddr = ret.data.address;
+        resolveAddr = ret.data.address.toString(16);
       } else {
         return;
       }

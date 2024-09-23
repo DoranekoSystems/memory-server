@@ -23,7 +23,7 @@ export function isHexadecimal(value: string | number): boolean {
 
 export async function getMemoryRegions(
   memoryApi: MemoryApi,
-  protection: string[]
+  protection: string
 ) {
   const response = await memoryApi.enumRegions();
   if (response.success) {
@@ -90,11 +90,7 @@ export async function getMemoryRegions(
         }
       }
 
-      return {
-        success: true,
-        status: 200,
-        data: f1 && f2 && f3,
-      };
+      return f1 && f2 && f3;
     });
 
     return filteredRegions;

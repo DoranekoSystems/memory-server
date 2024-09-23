@@ -18,6 +18,7 @@ import {
 } from "@/components/common/Card";
 import { formatFloat } from "@/lib/utils";
 import { PlusIcon, SaveIcon } from "@/components/common/Icon";
+import { isHexadecimal } from "@/lib/utils";
 
 export function MemoryView({ currentPage }) {
   const memoryApi = useStore((state) => state.memoryApi);
@@ -255,13 +256,22 @@ export function MemoryView({ currentPage }) {
     return regions.find((region) => region.id === selectedRegion);
   };
 
-  const handleGoClick = () => {
-    const address = inputAddress.startsWith("0x")
-      ? inputAddress.toUpperCase()
-      : "0x" + inputAddress.toUpperCase();
+  const handleGoClick = async () => {
+    const trimInputAddress = inputAddress.trim();
+    let resolveAddr = trimInputAddress;
+    if (!isHexadecimal(trimInputAddress)) {
+      let result = await memoryApi.resolveAddress(trimInputAddress);
+      if (result.success) {
+        resolveAddr = "0x" + result.data.address.toString(16).toUpperCase();
+      } else {
+        return;
+      }
+    }
     setRegions(
       regions.map((region) =>
-        region.id === selectedRegion ? { ...region, address: address } : region
+        region.id === selectedRegion
+          ? { ...region, address: resolveAddr }
+          : region
       )
     );
     setIsAddressChangedWithTimeout();

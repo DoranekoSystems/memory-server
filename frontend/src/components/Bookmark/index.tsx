@@ -132,11 +132,11 @@ export function Bookmark({ currentPage }) {
   };
 
   const handleAddNewBookmark = async () => {
-    let resolveAddr = newAddress;
+    let resolveAddr = newAddress.trim();
     if (!isHexadecimal(newAddress)) {
       let ret = await memoryApi.resolveAddress(newAddress);
       if (ret.success) {
-        resolveAddr = BigInt(ret.data).toString(16);
+        resolveAddr = ret.data.address;
       } else {
         return;
       }

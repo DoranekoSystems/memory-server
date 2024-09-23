@@ -98,6 +98,7 @@ const StyledTableRow = styled(TableRow)(({ theme }) => ({
 
 const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
   const memoryApi = useStore((state) => state.memoryApi);
+  const targetOS = useStore((state) => state.targetOS);
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const ipAddress = useStore((state) => state.ipAddress);
@@ -132,7 +133,7 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
           if (!isHexadecimal(bookmark.query)) {
             let result = await memoryApi.resolveAddress(bookmark.query);
             if (result.success) {
-              resolveAddr = parseInt(BigInt(result.data).toString(16), 16);
+              resolveAddr = result.data.address;
             } else {
               return;
             }
@@ -222,15 +223,12 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
           if (!isHexadecimal(bookmark.query)) {
             const ret = await memoryApi.resolveAddress(bookmark.query);
             if (ret.success) {
-              resolveAddr = parseInt(BigInt(ret.data).toString(16), 16);
+              resolveAddr = ret.data.addres;
             } else {
               return;
             }
           }
-          const ret = await memoryApi.writeProcessMemory(
-            resolveAddr,
-            Array.from(new Uint8Array(buffer))
-          );
+          const ret = await memoryApi.writeProcessMemory(resolveAddr, buffer);
           if (ret.success) {
             console.log(
               `Memory frozen successfully for address: 0x${BigInt(
@@ -364,13 +362,15 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
         console.error("Unsupported type:", editedType);
         return;
     }
-
     updatedBookmark.value = arrayBufferToLittleEndianHexString(buffer);
     try {
       let resolveAddr = updatedBookmark.address;
       if (!isHexadecimal(updatedBookmark.query)) {
-        let tmp = await resolveAddress(ipAddress, updatedBookmark.query);
-        resolveAddr = parseInt(BigInt(tmp).toString(16), 16);
+        const ret = await memoryApi.resolveAddress(updatedBookmark.query);
+        if (!ret.success) {
+          return;
+        }
+        resolveAddr = ret.data.address;
       }
 
       const ret = await memoryApi.writeProcessMemory(resolveAddr, buffer);
@@ -557,19 +557,23 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
                             <EditIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
-                        <Tooltip title="Watch">
-                          <IconButton
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              {
-                                setOpen(true);
-                              }
-                            }}
-                            size="small"
-                          >
-                            <BugReportIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
+                        {targetOS === "ios" ? (
+                          <Tooltip title="Watch">
+                            <IconButton
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                {
+                                  setOpen(true);
+                                }
+                              }}
+                              size="small"
+                            >
+                              <BugReportIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        ) : (
+                          ""
+                        )}
                         <Tooltip title="Delete">
                           <IconButton
                             onClick={(e) => {

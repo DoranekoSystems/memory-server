@@ -6,7 +6,7 @@ use log::LevelFilter;
 use std::io::Write;
 use warp::log::Info;
 
-static EXCLUDED_PATHS: &[&str] = &["/_next", "/readmemory", "/exceptioninfo"];
+static EXCLUDED_PATHS: &[&str] = &["/_next", "/exceptioninfo"];
 static EXCLUDED_EXTENSIONS: &[&str] = &[
     ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".webp", ".bmp", ".tiff",
 ];
@@ -65,6 +65,11 @@ pub fn http_log(info: Info) {
         .iter()
         .any(|prefix| info.path().starts_with(prefix))
     {
+        return;
+    }
+
+    // readprocessmemory
+    if info.path() == "/memory" && info.method() == "GET" {
         return;
     }
     if EXCLUDED_EXTENSIONS

@@ -38,6 +38,7 @@ fn main() {
             }
             build.file("src/cpp/src/windows/native_api.cpp");
             build.file("src/cpp/src/windows/file_api.cpp");
+            build.file("src/cpp/src/windows/debugger.cpp");
         }
         "macos" => {
             build.file("src/cpp/src/darwin/native_api.mm");
@@ -70,6 +71,7 @@ fn main() {
             build.flag_if_supported("-DTARGET_IS_ANDROID");
             build.file("src/cpp/src/linux/native_api.cpp");
             build.file("src/cpp/src/linux/file_api.cpp");
+            build.file("src/cpp/src/linux/debugger.cpp");
         }
 
         "linux" => {
@@ -77,6 +79,7 @@ fn main() {
             println!("cargo:rustc-link-arg=-lstdc++");
             build.file("src/cpp/src/linux/native_api.cpp");
             build.file("src/cpp/src/linux/file_api.cpp");
+            build.file("src/cpp/src/linux/debugger.cpp");
         }
 
         _ => {

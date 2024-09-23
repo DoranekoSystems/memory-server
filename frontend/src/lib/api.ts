@@ -53,7 +53,7 @@ export class MemoryApi {
     try {
       const response = await axios.post(this.baseUrl + "memory", {
         address,
-        buffer,
+        buffer: Array.from(new Uint8Array(buffer)),
       });
       return this.handleResponse(response);
     } catch (error) {

@@ -46,12 +46,16 @@ export function Header({ changePage }): any {
         >
           Memory View
         </button>
-        <button
-          className="text-sm font-medium hover:underline underline-offset-4"
-          onClick={() => changePage("debugger")}
-        >
-          Debugger
-        </button>
+        {targetOS === "ios" ? (
+          <button
+            className="text-sm font-medium hover:underline underline-offset-4"
+            onClick={() => changePage("debugger")}
+          >
+            Debugger
+          </button>
+        ) : (
+          ""
+        )}
         <button
           className="text-sm font-medium hover:underline underline-offset-4"
           onClick={() => changePage("information")}

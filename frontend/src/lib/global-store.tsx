@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { MemoryApi } from "@/lib/api";
 
 type RegisterInfo = {
   [key: string]: number;
@@ -39,6 +40,8 @@ interface GlobalState {
   setServerMode: (serverMode: string) => void;
   targetOS: string;
   setTargetOS: (targetOS: string) => void;
+  memoryApi: MemoryApi;
+  setMemoryApi: (memoryApi: MemoryApi) => void;
 }
 
 export const useStore = create<GlobalState>((set) => ({
@@ -52,6 +55,8 @@ export const useStore = create<GlobalState>((set) => ({
   setServerMode: (mode: string) => set({ serverMode: mode }),
   targetOS: "",
   setTargetOS: (name: string) => set({ targetOS: name }),
+  memoryApi: new MemoryApi("127.0.0.1"),
+  setMemoryApi: (api: MemoryApi) => set({ memoryApi: api }),
 }));
 
 export const useWatchpointStore = create<WatchpointStore>((set) => ({

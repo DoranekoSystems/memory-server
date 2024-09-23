@@ -1,5 +1,4 @@
 import React, { useState, useCallback, useEffect } from "react";
-import axios from "axios";
 import { useStore } from "@/lib/global-store";
 import {
   Card,
@@ -35,6 +34,7 @@ import {
   Search as SearchIcon,
 } from "@mui/icons-material";
 import path from "path";
+import { enumModules } from "@/lib/api";
 
 const theme = createTheme({
   palette: {
@@ -160,6 +160,7 @@ const ModuleRow = ({ module, index }) => {
 };
 
 export function Modules({ currentPage }) {
+  const memoryApi = useStore((state) => state.memoryApi);
   const [modules, setModules] = useState([]);
   const [filteredModules, setFilteredModules] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -178,9 +179,9 @@ export function Modules({ currentPage }) {
   const fetchModules = async () => {
     setLoading(true);
     setError(null);
-    try {
-      const response = await axios.get(`http://${ipAddress}:3030/enummodule`);
-      const moduleData = response.data.modules;
+    const result = await memoryApi.enumModules();
+    if (result.success) {
+      const moduleData = result.data.modules;
       const formattedModules = moduleData.map((module, index) => ({
         index: index + 1,
         start: module.base,
@@ -191,12 +192,11 @@ export function Modules({ currentPage }) {
       }));
       setModules(formattedModules);
       setFilteredModules(formattedModules);
-    } catch (error) {
-      console.error("Error fetching modules:", error);
+    } else {
+      console.log(result.message);
       setError("Failed to fetch modules. Please try again.");
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
   };
 
   useEffect(() => {

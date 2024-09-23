@@ -14,8 +14,8 @@ import {
 import { styled } from "@mui/system";
 import { Theme } from "@mui/material/styles";
 import DeleteIcon from "@mui/icons-material/Delete";
-import axios from "axios";
 import { useStore, useWatchpointStore } from "@/lib/global-store";
+import { removeWatchPoint } from "@/lib/api";
 
 const StyledTableContainer = styled(TableContainer)(({ theme }) => ({
   maxHeight: "70vh",
@@ -39,20 +39,22 @@ const StyledTableCell = styled(TableCell)<{ theme?: Theme }>(({ theme }) => ({
 }));
 
 const WatchPointTable = ({ watchpointData, onDelete }) => {
+  const memoryApi = useStore((state) => state.memoryApi);
   const ipAddress = useStore((state) => state.ipAddress);
-  const removeWatchpoint = useWatchpointStore(
+  const _removeWatchpoint = useWatchpointStore(
     (state) => state.removeWatchpoint
   );
 
   const handleDelete = async () => {
-    try {
-      await axios.delete(`http://${ipAddress}:3030/watchpoint`, {
-        data: { address: Number(watchpointData.address) },
-      });
-      removeWatchpoint(watchpointData.address);
+    const ret = await memoryApi.removeWatchPoint(
+      Number(watchpointData.address)
+    );
+    if (ret.success) {
+      _removeWatchpoint(watchpointData.address);
       onDelete(watchpointData.address);
-    } catch (error) {
-      console.error("Error removing watchpoint:", error);
+    } else if (ret.status == 500) {
+      _removeWatchpoint(watchpointData.address);
+      onDelete(watchpointData.address);
     }
   };
 

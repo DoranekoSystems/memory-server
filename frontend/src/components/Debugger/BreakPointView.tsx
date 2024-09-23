@@ -14,6 +14,7 @@ import { isHexadecimal } from "@/lib/utils";
 import { setBreakPoint } from "@/lib/api";
 
 const BreakPointView = ({ breakpointData }) => {
+  const memoryApi = useStore((state) => state.memoryApi);
   const [newAddress, setNewAddress] = useState("");
   const [newHitCount, setNewHitCount] = useState("10");
   const addBreakpoint = useBreakpointStore((state) => state.addBreakpoint);
@@ -30,20 +31,22 @@ const BreakPointView = ({ breakpointData }) => {
   const handleAddNewBreakpoint = async () => {
     let resolveAddr = newAddress;
     if (!isHexadecimal(newAddress)) {
-      let tmp = await resolveAddress(ipAddress, newAddress);
-      resolveAddr = BigInt(tmp).toString(16);
+      const ret = await memoryApi.resolveAddress(newAddress);
+      if (!ret.success) return;
+      resolveAddr = BigInt(ret.data).toString(16);
     }
     addBreakpoint({
       address: parseInt(resolveAddr, 16),
       hitCount: parseInt(newHitCount, 10),
     });
-    await setBreakPoint(
-      ipAddress,
+    const ret = await memoryApi.setBreakPoint(
       parseInt(resolveAddr, 16),
       parseInt(newHitCount, 10)
     );
-    setNewAddress("");
-    setNewHitCount("10");
+    if (ret.success) {
+      setNewAddress("");
+      setNewHitCount("10");
+    }
   };
 
   return (

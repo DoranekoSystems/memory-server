@@ -42,14 +42,12 @@ import {
   Done as DoneIcon,
   Check as CheckIcon,
 } from "@mui/icons-material";
-import axios from "axios";
 import {
   getByteLengthFromScanType,
   arrayBufferToLittleEndianHexString,
   convertFromLittleEndianHex,
 } from "@/lib/converter";
 import { isHexadecimal } from "@/lib/utils";
-import { readProcessMemory, resolveAddress, setWatchPoint } from "@/lib/api";
 import { useStore, useWatchpointStore } from "@/lib/global-store";
 
 const theme = createTheme({
@@ -99,6 +97,7 @@ const StyledTableRow = styled(TableRow)(({ theme }) => ({
 }));
 
 const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
+  const memoryApi = useStore((state) => state.memoryApi);
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const ipAddress = useStore((state) => state.ipAddress);
@@ -131,21 +130,29 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
         try {
           let resolveAddr = bookmark.address;
           if (!isHexadecimal(bookmark.query)) {
-            let tmp = await resolveAddress(ipAddress, bookmark.query);
-            resolveAddr = parseInt(BigInt(tmp).toString(16), 16);
+            let result = await memoryApi.resolveAddress(bookmark.query);
+            if (result.success) {
+              resolveAddr = parseInt(BigInt(result.data).toString(16), 16);
+            } else {
+              return;
+            }
           }
-          const memoryData = await readProcessMemory(
-            ipAddress,
+          const result = await memoryApi.readProcessMemory(
             resolveAddr,
             getByteLengthFromScanType(bookmark.type, bookmark.value)
           );
-          const updatedValue = memoryData
-            ? arrayBufferToLittleEndianHexString(memoryData)
-            : "???????";
+          if (result.success) {
+            const memoryData = result.data;
+            const updatedValue = memoryData
+              ? arrayBufferToLittleEndianHexString(memoryData)
+              : "???????";
 
-          const finalValue = isRowFrozen(index) ? bookmark.value : updatedValue;
+            const finalValue = isRowFrozen(index)
+              ? bookmark.value
+              : updatedValue;
 
-          return { ...bookmark, address: resolveAddr, value: finalValue };
+            return { ...bookmark, address: resolveAddr, value: finalValue };
+          }
         } catch (error) {
           console.error("Error updating memory value:", error);
           return bookmark;
@@ -213,21 +220,28 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
           }
           let resolveAddr = bookmark.address;
           if (!isHexadecimal(bookmark.query)) {
-            let tmp = await resolveAddress(ipAddress, bookmark.query);
-            resolveAddr = parseInt(BigInt(tmp).toString(16), 16);
+            const ret = await memoryApi.resolveAddress(bookmark.query);
+            if (ret.success) {
+              resolveAddr = parseInt(BigInt(ret.data).toString(16), 16);
+            } else {
+              return;
+            }
           }
-          await axios.post(`http://${ipAddress}:3030/writememory`, {
-            address: resolveAddr,
-            buffer: Array.from(new Uint8Array(buffer)),
-          });
-
-          console.log(
-            `Memory frozen successfully for address: 0x${BigInt(
-              bookmark.address
-            )
-              .toString(16)
-              .toUpperCase()}`
+          const ret = await memoryApi.writeProcessMemory(
+            resolveAddr,
+            Array.from(new Uint8Array(buffer))
           );
+          if (ret.success) {
+            console.log(
+              `Memory frozen successfully for address: 0x${BigInt(
+                bookmark.address
+              )
+                .toString(16)
+                .toUpperCase()}`
+            );
+          } else {
+            console.log(ret.message);
+          }
 
           setFrozenValues((prev) => ({
             ...prev,
@@ -285,17 +299,18 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
 
   const handleSetWatchPoint = async (event, index) => {
     const address = bookMarkLists[index].address;
-    await setWatchPoint(
-      ipAddress,
+    const result = await memoryApi.setWatchPoint(
       address,
       parseInt(selectedSize),
       selectedType
     );
-    useWatchpointStore.getState().addWatchpoint({
-      address,
-      size: parseInt(selectedSize),
-      type: selectedType,
-    });
+    if (result.success) {
+      useWatchpointStore.getState().addWatchpoint({
+        address,
+        size: parseInt(selectedSize),
+        type: selectedType,
+      });
+    }
     setOpen(false);
   };
 
@@ -357,16 +372,17 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
         let tmp = await resolveAddress(ipAddress, updatedBookmark.query);
         resolveAddr = parseInt(BigInt(tmp).toString(16), 16);
       }
-      await axios.post(`http://${ipAddress}:3030/writememory`, {
-        address: resolveAddr,
-        buffer: Array.from(new Uint8Array(buffer)),
-      });
 
-      console.log(
-        `Memory updated successfully for address: 0x${BigInt(resolveAddr)
-          .toString(16)
-          .toUpperCase()}`
-      );
+      const ret = await memoryApi.writeProcessMemory(resolveAddr, buffer);
+      if (ret.success) {
+        console.log(
+          `Memory updated successfully for address: 0x${BigInt(resolveAddr)
+            .toString(16)
+            .toUpperCase()}`
+        );
+      } else {
+        console.log(ret.message);
+      }
 
       setBookmarkLists((prevLists) =>
         prevLists.map((item, i) => (i === index ? updatedBookmark : item))

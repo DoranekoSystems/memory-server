@@ -22,16 +22,16 @@ pub async fn serve(mode: i32, host: IpAddr, port: u16) {
         .map(|tail: Tail| tail.as_str().to_string())
         .and_then(serve_static);
 
-    let enum_process = warp::path!("enumprocess")
+    let enum_process = warp::path!("processes")
         .and(warp::get())
         .and_then(api::enumerate_process_handler);
 
-    let enum_module = warp::path!("enummodule")
+    let enum_module = warp::path!("modules")
         .and(warp::get())
         .and(api::with_state(pid_state.clone()))
         .and_then(|pid_state| async move { api::enummodule_handler(pid_state).await });
 
-    let open_process = warp::path!("openprocess")
+    let open_process = warp::path!("process")
         .and(warp::post())
         .and(warp::body::json())
         .and(api::with_state(pid_state.clone()))
@@ -39,7 +39,7 @@ pub async fn serve(mode: i32, host: IpAddr, port: u16) {
             api::open_process_handler(pid_state, open_process).await
         });
 
-    let read_memory = warp::path!("readmemory")
+    let read_memory = warp::path!("memory")
         .and(warp::get())
         .and(warp::query::<request::ReadMemoryRequest>())
         .and(api::with_state(pid_state.clone()))
@@ -47,21 +47,21 @@ pub async fn serve(mode: i32, host: IpAddr, port: u16) {
             api::read_memory_handler(pid_state, read_memory_request).await
         });
 
-    let read_memory_multiple = warp::path!("readmemories")
+    let write_memory = warp::path!("memory")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(api::with_state(pid_state.clone()))
+        .and_then(|write_memory, pid_state| async move {
+            api::write_memory_handler(pid_state, write_memory).await
+        });
+
+    let read_memory_multiple = warp::path!("memories")
         .and(warp::post())
         .and(warp::body::content_length_limit(1024 * 1024 * 10)) // 10MB
         .and(warp::body::json::<Vec<request::ReadMemoryRequest>>())
         .and(api::with_state(pid_state.clone()))
         .and_then(|read_memory_requests, pid_state| async move {
             api::read_memory_multiple_handler(pid_state, read_memory_requests).await
-        });
-
-    let write_memory = warp::path!("writememory")
-        .and(warp::post())
-        .and(warp::body::json())
-        .and(api::with_state(pid_state.clone()))
-        .and_then(|write_memory, pid_state| async move {
-            api::write_memory_handler(pid_state, write_memory).await
         });
 
     let memory_scan = warp::path!("memoryscan")
@@ -80,7 +80,7 @@ pub async fn serve(mode: i32, host: IpAddr, port: u16) {
             api::memory_filter_handler(pid_state, filter_request).await
         });
 
-    let enum_regions = warp::path!("enumregions")
+    let enum_regions = warp::path!("regions")
         .and(warp::get())
         .and(api::with_state(pid_state.clone()))
         .and_then(|pid_state| async move { api::enumerate_regions_handler(pid_state).await });
@@ -100,14 +100,14 @@ pub async fn serve(mode: i32, host: IpAddr, port: u16) {
             api::explore_directory_handler(explore_directory_request).await
         });
 
-    let read_file = warp::path!("readfile")
+    let read_file = warp::path!("file")
         .and(warp::get())
         .and(warp::query::<request::ReadFileRequest>())
         .and_then(
             |read_file_request| async move { api::read_file_handler(read_file_request).await },
         );
 
-    let get_app_info = warp::path!("getappinfo")
+    let get_app_info = warp::path!("appinfo")
         .and(warp::get())
         .and(api::with_state(pid_state.clone()))
         .and_then(|pid_state| async move { api::get_app_info_handler(pid_state).await });

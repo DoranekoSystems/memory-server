@@ -1,4 +1,3 @@
-import axios from "axios";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/common/Button";
 import { Input } from "@/components/common/Input";
@@ -17,11 +16,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/common/Card";
-import { getMemoryRegions, readProcessMemory } from "@/lib/api";
 import { formatFloat } from "@/lib/utils";
 import { PlusIcon, SaveIcon } from "@/components/common/Icon";
 
 export function MemoryView({ currentPage }) {
+  const memoryApi = useStore((state) => state.memoryApi);
   const [isMobile, setIsMobile] = useState(false);
   const ipAddress = useStore((state) => state.ipAddress);
   const [inputAddress, setInputAddress] = useState("");
@@ -186,22 +185,24 @@ export function MemoryView({ currentPage }) {
         if (region.address) {
           return setInterval(async () => {
             if (!isVisible) return;
-            const data = await readProcessMemory(
-              ipAddress,
+            const result = await memoryApi.readProcessMemory(
               parseInt(region.address, 16),
               512
             );
-            setRegions((prevRegions) =>
-              prevRegions.map((r) =>
-                r.id === region.id
-                  ? {
-                      ...r,
-                      prevMemoryData: r.memoryData,
-                      memoryData: data,
-                    }
-                  : r
-              )
-            );
+            if (result.success) {
+              const data = result.data;
+              setRegions((prevRegions) =>
+                prevRegions.map((r) =>
+                  r.id === region.id
+                    ? {
+                        ...r,
+                        prevMemoryData: r.memoryData,
+                        memoryData: data,
+                      }
+                    : r
+                )
+              );
+            }
           }, 100);
         }
         return null;
@@ -255,12 +256,12 @@ export function MemoryView({ currentPage }) {
   };
 
   const handleGoClick = () => {
-    const ip = inputAddress.startsWith("0x")
+    const address = inputAddress.startsWith("0x")
       ? inputAddress.toUpperCase()
       : "0x" + inputAddress.toUpperCase();
     setRegions(
       regions.map((region) =>
-        region.id === selectedRegion ? { ...region, address: ip } : region
+        region.id === selectedRegion ? { ...region, address: address } : region
       )
     );
     setIsAddressChangedWithTimeout();
@@ -314,12 +315,11 @@ export function MemoryView({ currentPage }) {
     } else {
       newByteValue = (currentByteValue & 0xf0) + newValue;
     }
-    const response = await axios.post(`http://${ipAddress}:3030/writememory`, {
-      address: address,
-      buffer: [newByteValue],
-    });
+    const response = await memoryApi.writeProcessMemory(address, [
+      newByteValue,
+    ]);
 
-    if (response.status === 200) {
+    if (response.success) {
       buffer[cellIndex * adjust + adjust - Math.floor(cellPosition / 2) - 1] =
         newByteValue;
       const updatedRegions = regions.map((r) => {

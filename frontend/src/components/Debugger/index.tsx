@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import axios from "axios";
+
 import {
   useStore,
   useWatchpointStore,
@@ -17,6 +17,7 @@ import {
   Box,
 } from "@mui/material";
 import { styled } from "@mui/material/styles";
+import { getExceptionInfo } from "@/lib/api";
 
 const StyledTabs = styled(Tabs)({
   borderBottom: "1px solid #e8e8e8",
@@ -62,6 +63,7 @@ const StyledTab = styled((props) => <Tab disableRipple {...props} />)(
 );
 
 export function Debugger({ currentPage }) {
+  const memoryApi = useStore((state) => state.memoryApi);
   const ipAddress = useStore((state) => state.ipAddress);
   const watchpoints = useWatchpointStore((state) => state.watchpoints);
   const breakpoints = useBreakpointStore((state) => state.breakpoints);
@@ -81,11 +83,9 @@ export function Debugger({ currentPage }) {
     if (!isVisible) return;
 
     const pollException = async () => {
-      try {
-        const response = await axios.get(
-          `http://${ipAddress}:3030/exceptioninfo`
-        );
-        const exceptions = response.data;
+      const ret = await memoryApi.getExceptionInfo();
+      if (ret.success) {
+        const exceptions = ret.data;
         exceptions.forEach((exceptionInfo) => {
           const registerInfo = {};
           for (let i = 0; i < 31; i++) {
@@ -169,8 +169,8 @@ export function Debugger({ currentPage }) {
             }
           }
         });
-      } catch (error) {
-        console.error("Error polling /exception:", error);
+      } else {
+        console.error(`Error polling /exception:${ret.message}`);
       }
     };
 
@@ -199,7 +199,7 @@ export function Debugger({ currentPage }) {
   return (
     <Box className="flex flex-col min-h-screen">
       <Box className="flex-grow p-8">
-        <Card className="w-full">
+        <Card sx={{ width: "80%", margin: "0 auto" }}>
           <CardHeader title={<Typography variant="h5">Debugger</Typography>} />
           <CardContent>
             <StyledTabs

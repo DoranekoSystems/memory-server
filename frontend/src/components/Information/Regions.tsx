@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from "react";
-import axios from "axios";
 import { useStore } from "@/lib/global-store";
 import {
   Card,
@@ -33,6 +32,7 @@ import {
   KeyboardArrowUp,
   Search as SearchIcon,
 } from "@mui/icons-material";
+import { enumRegions } from "@/lib/api";
 
 const theme = createTheme({
   palette: {
@@ -117,6 +117,7 @@ const RegionRow = ({ region, index }) => (
 );
 
 export function Regions() {
+  const memoryApi = useStore((state) => state.memoryApi);
   const [regions, setRegions] = useState([]);
   const [filteredRegions, setFilteredRegions] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -135,9 +136,10 @@ export function Regions() {
   const fetchRegions = async () => {
     setLoading(true);
     setError(null);
-    try {
-      const response = await axios.get(`http://${ipAddress}:3030/enumregions`);
-      const regionData = response.data.regions;
+
+    const result = await memoryApi.enumRegions();
+    if (result.success) {
+      const regionData = result.data.regions;
       const formattedRegions = regionData
         .filter((region) => region.protection !== "---")
         .map((region, index) => ({
@@ -146,12 +148,11 @@ export function Regions() {
         }));
       setRegions(formattedRegions);
       setFilteredRegions(formattedRegions);
-    } catch (error) {
+    } else {
       console.error("Error fetching regions:", error);
       setError("Failed to fetch regions. Please try again.");
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
   };
 
   useEffect(() => {

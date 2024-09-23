@@ -387,8 +387,6 @@ kern_return_t Debugger::handle_exception(mach_port_t exception_port, mach_port_t
             {
                 std::string register_json = map_vector_to_json_string(map_vector);
                 send_register_json(register_json.c_str(), pid_);
-
-                std::cout << __LINE__ << std::endl;
                 // onetime breakpoint
                 debug_state.__bcr[i] = 0;  // Disable the breakpoint
                 return handle_breakpoint_hit(thread, debug_state, thread_state, exception_state, i);
@@ -396,7 +394,7 @@ kern_return_t Debugger::handle_exception(mach_port_t exception_port, mach_port_t
         }
     }
 
-    return KERN_FAILURE;
+    return KERN_SUCCESS;
 }
 
 kern_return_t Debugger::handle_single_step(mach_port_t thread, arm_debug_state64_t& debug_state,

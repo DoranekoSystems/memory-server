@@ -20,14 +20,15 @@ import {
 } from "@/components/common/Select";
 import ScanTable from "./ScanTable";
 import TabBar from "./TaBbar";
-
+import { MemoryApi } from "@/lib/api";
 import {
   convertFromLittleEndianHex,
   convertToLittleEndianHex,
 } from "@/lib/converter";
-import { getMemoryRegions } from "@/lib/api";
 
+import { getMemoryRegions } from "@/lib/utils";
 export function Scanner({ currentPage }) {
+  const memoryApi = useStore((state) => state.memoryApi);
   const [tabs, setTabs] = useState([{ id: "Scan 1", label: "Scan 1" }]);
   const [activeTab, setActiveTab] = useState("Scan 1");
   const [tabStates, setTabStates] = useState({
@@ -64,7 +65,6 @@ export function Scanner({ currentPage }) {
 
   const tableRef = useRef(null);
 
-  const ipAddress = useStore((state) => state.ipAddress);
   const serverMode = useStore((state) => state.serverMode);
 
   useEffect(() => {
@@ -186,7 +186,7 @@ export function Scanner({ currentPage }) {
         currentState.dataType
       );
       const filteredRegions = await getMemoryRegions(
-        ipAddress,
+        memoryApi,
         getProtectionString(currentState.protection)
       );
       const scanRanges = filteredRegions.map((region) => [
@@ -198,25 +198,25 @@ export function Scanner({ currentPage }) {
           BigInt(start) >= currentState.addressRange.start &&
           BigInt(end) <= currentState.addressRange.end
       );
-      const response = await axios.post(`http://${ipAddress}:3030/memoryscan`, {
+      const response = await memoryApi.memoryScan(
         pattern,
-        address_ranges: _addressRanges,
-        find_type: currentState.findType,
-        data_type: currentState.dataType,
-        align: currentState.scanAlign || 1,
-        scan_id: activeTab,
-        return_as_json: true,
-        do_suspend: currentState.doSuspend,
-      });
+        _addressRanges,
+        currentState.findType,
+        currentState.dataType,
+        currentState.scanAlign || 1,
+        activeTab,
+        true,
+        currentState.doSuspend
+      );
 
-      if (response.status === 200) {
+      if (response.success) {
         updateTabState({
           scanResults: response.data.matched_addresses || [],
           scanResultsCount: response.data.found,
           isScanRounded: response.data.is_rounded,
         });
       } else {
-        console.error(`Memory scan failed: ${response.status}`);
+        console.error(`Memory scan failed: ${response.message}`);
       }
     } catch (error) {
       console.error("Error scanning memory:", error);
@@ -242,19 +242,16 @@ export function Scanner({ currentPage }) {
         currentState.scanValue,
         currentState.dataType
       );
-      const response = await axios.post(
-        `http://${ipAddress}:3030/memoryfilter`,
-        {
-          pattern,
-          data_type: currentState.dataType,
-          scan_id: activeTab,
-          filter_method: currentState.filterType,
-          return_as_json: true,
-          do_suspend: currentState.doSuspend,
-        }
+      const response = await memoryApi.memoryFilter(
+        pattern,
+        currentState.dataType,
+        activeTab,
+        currentState.filterType,
+        true,
+        currentState.doSuspend
       );
 
-      if (response.status === 200) {
+      if (response.success) {
         updateTabState({
           scanResults: response.data.matched_addresses || [],
           scanResultsCount: response.data.found,
@@ -311,18 +308,18 @@ export function Scanner({ currentPage }) {
     );
 
     for (const address of currentState.selectedAddresses) {
-      try {
-        await axios.post(`http://${ipAddress}:3030/writememory`, {
-          address: address,
-          buffer: Array.from(buffer),
-        });
+      const result = await memoryApi.writeProcessMemory(
+        address,
+        Array.from(buffer)
+      );
+      if (result.success) {
         console.log(
           `Memory patched successfully for address: 0x${BigInt(address)
             .toString(16)
             .toUpperCase()}`
         );
-      } catch (error) {
-        console.error("Error patching memory:", error);
+      } else {
+        console.log(result.message);
       }
     }
   };

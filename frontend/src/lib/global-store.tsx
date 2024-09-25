@@ -9,12 +9,30 @@ type Watchpoint = {
   address: number;
   size: number;
   type: string;
+  id: string;
+};
+
+type WatchpointHit = {
+  pcAddress: number;
+  count: number;
+  opcode: string;
+};
+
+type WatchpointHits = {
+  watchpoint: Watchpoint;
+  hits: WatchpointHit[];
 };
 
 type WatchpointStore = {
   watchpoints: Watchpoint[];
+  watchpointHitsList: WatchpointHits[];
   addWatchpoint: (watchpoint: Watchpoint) => void;
   removeWatchpoint: (address: number) => void;
+  addWatchpointHit: (
+    watchpoint: Watchpoint,
+    pcAddress: number,
+    opcode: string
+  ) => void;
 };
 
 type Breakpoint = {
@@ -61,14 +79,68 @@ export const useStore = create<GlobalState>((set) => ({
 
 export const useWatchpointStore = create<WatchpointStore>((set) => ({
   watchpoints: [],
+  watchpointHitsList: [],
+
   addWatchpoint: (watchpoint) =>
     set((state) => ({
       watchpoints: [...state.watchpoints, watchpoint],
     })),
+
   removeWatchpoint: (address) =>
     set((state) => ({
       watchpoints: state.watchpoints.filter((wp) => wp.address !== address),
+      watchpointHitsList: state.watchpointHitsList.filter(
+        (wh) => wh.watchpoint.address !== address
+      ),
     })),
+
+  addWatchpointHit: (watchpoint, pcAddress, opcode) =>
+    set((state) => {
+      const existingWatchpointHits = state.watchpointHitsList.find(
+        (wh) => wh.watchpoint.address === watchpoint.address
+      );
+
+      if (existingWatchpointHits) {
+        const existingHit = existingWatchpointHits.hits.find(
+          (hit) => hit.pcAddress === pcAddress
+        );
+
+        if (existingHit) {
+          return {
+            watchpointHitsList: state.watchpointHitsList.map((wh) =>
+              wh.watchpoint.address === watchpoint.address
+                ? {
+                    ...wh,
+                    hits: wh.hits.map((hit) =>
+                      hit.pcAddress === pcAddress
+                        ? { ...hit, count: hit.count + 1 }
+                        : hit
+                    ),
+                  }
+                : wh
+            ),
+          };
+        } else {
+          return {
+            watchpointHitsList: state.watchpointHitsList.map((wh) =>
+              wh.watchpoint.address === watchpoint.address
+                ? {
+                    ...wh,
+                    hits: [...wh.hits, { pcAddress, count: 1, opcode }],
+                  }
+                : wh
+            ),
+          };
+        }
+      } else {
+        return {
+          watchpointHitsList: [
+            ...state.watchpointHitsList,
+            { watchpoint, hits: [{ pcAddress, count: 1, opcode }] },
+          ],
+        };
+      }
+    }),
 }));
 
 export const useBreakpointStore = create<BreakpointStore>((set) => ({

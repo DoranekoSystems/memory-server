@@ -157,6 +157,17 @@ export class MemoryApi {
     }
   }
 
+  async removeBreakPoint(address: number) {
+    try {
+      const response = await axios.delete(this.baseUrl + "breakpoint", {
+        data: { address: address },
+      });
+      return this.handleResponse(response);
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
   async removeWatchPoint(address: number) {
     try {
       const response = await axios.delete(this.baseUrl + "watchpoint", {

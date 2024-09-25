@@ -41,6 +41,7 @@ import {
   BugReport as BugReportIcon,
   Done as DoneIcon,
   Check as CheckIcon,
+  CheckCircle as CheckCircleIcon,
 } from "@mui/icons-material";
 import {
   getByteLengthFromScanType,
@@ -49,6 +50,7 @@ import {
 } from "@/lib/converter";
 import { isHexadecimal } from "@/lib/utils";
 import { useStore, useWatchpointStore } from "@/lib/global-store";
+import { v4 as uuidv4 } from "uuid";
 
 const theme = createTheme({
   palette: {
@@ -99,6 +101,7 @@ const StyledTableRow = styled(TableRow)(({ theme }) => ({
 const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
   const memoryApi = useStore((state) => state.memoryApi);
   const targetOS = useStore((state) => state.targetOS);
+  const serverMode = useStore((state) => state.serverMode);
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const ipAddress = useStore((state) => state.ipAddress);
@@ -303,10 +306,12 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
       selectedType
     );
     if (result.success) {
+      const uuid = uuidv4();
       useWatchpointStore.getState().addWatchpoint({
         address,
         size: parseInt(selectedSize),
         type: selectedType,
+        id: uuid,
       });
     }
     setOpen(false);
@@ -557,7 +562,7 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
                             <EditIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
-                        {targetOS === "ios" ? (
+                        {targetOS === "ios" && serverMode == "normal" ? (
                           <Tooltip title="Watch">
                             <IconButton
                               onClick={(e) => {
@@ -651,7 +656,7 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
                                 onClick={(e) => handleSetWatchPoint(e, index)}
                                 size="small"
                               >
-                                <CheckIcon fontSize="small" />
+                                <CheckCircleIcon fontSize="small" />
                               </IconButton>
                             </Tooltip>
                             <Tooltip title="Cancel">

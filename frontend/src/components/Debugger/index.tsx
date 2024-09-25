@@ -18,6 +18,7 @@ import {
 } from "@mui/material";
 import { styled } from "@mui/material/styles";
 import { getExceptionInfo } from "@/lib/api";
+import { watch } from "fs";
 
 const StyledTabs = styled(Tabs)({
   borderBottom: "1px solid #e8e8e8",
@@ -66,11 +67,13 @@ export function Debugger({ currentPage }) {
   const memoryApi = useStore((state) => state.memoryApi);
   const ipAddress = useStore((state) => state.ipAddress);
   const watchpoints = useWatchpointStore((state) => state.watchpoints);
+  const addWatchpointHit = useWatchpointStore(
+    (state) => state.addWatchpointHit
+  );
   const breakpoints = useBreakpointStore((state) => state.breakpoints);
   const updateBreakpointHitCount = useBreakpointStore(
     (state) => state.updateBreakpointHitCount
   );
-  const [watchpointData, setWatchpointData] = useState({});
   const [breakpointData, setBreakpointData] = useState([]);
   const [isVisible, setIsVisible] = useState(currentPage === "debugger");
   const [activeTab, setActiveTab] = useState(0);
@@ -109,36 +112,15 @@ export function Debugger({ currentPage }) {
               (wp) => BigInt(wp.address) === memoryAddress
             );
             if (matchingWatchpoint) {
-              setWatchpointData((prevData) => {
-                const newData = { ...prevData };
-                if (!newData[memoryAddress]) {
-                  newData[memoryAddress] = {
-                    address: memoryAddress,
-                    size: matchingWatchpoint.size,
-                    type: matchingWatchpoint.type,
-                    hits: [],
-                    register: registerInfo,
-                  };
-                }
-                const pcAddress = BigInt(exceptionInfo.pc);
-                const instruction =
-                  exceptionInfo.instruction.split(": ")[1] ||
-                  exceptionInfo.instruction;
-                const existingHit = newData[memoryAddress].hits.find(
-                  (hit) => hit.address === pcAddress
-                );
-                if (existingHit) {
-                  existingHit.count += 1;
-                } else {
-                  newData[memoryAddress].hits.push({
-                    count: 1,
-                    address: pcAddress,
-                    opcode: instruction.trim(),
-                    register: registerInfo,
-                  });
-                }
-                return newData;
-              });
+              const pcAddress = Number(exceptionInfo.pc);
+              const instruction =
+                exceptionInfo.instruction.split(": ")[1] ||
+                exceptionInfo.instruction;
+              addWatchpointHit(
+                matchingWatchpoint,
+                pcAddress,
+                instruction.toUpperCase()
+              );
             }
           } else {
             // Breakpoint handling
@@ -190,14 +172,6 @@ export function Debugger({ currentPage }) {
     updateBreakpointHitCount,
   ]);
 
-  const handleDeleteWatchpoint = (address) => {
-    setWatchpointData((prevData) => {
-      const newData = { ...prevData };
-      delete newData[address];
-      return newData;
-    });
-  };
-
   const handleTabChange = (event, newValue) => {
     setActiveTab(newValue);
   };
@@ -214,18 +188,12 @@ export function Debugger({ currentPage }) {
               aria-label="debugger tabs"
             >
               <StyledTab label="Watchpoints" />
-              <StyledTab label="Breakpoints" />
             </StyledTabs>
             <Box sx={{ p: 3 }}>
               {activeTab === 0 && (
                 <Box className="overflow-y-auto max-h-[700px]">
-                  {Object.values(watchpointData).map((data: any) => (
-                    <WatchPointTable
-                      ref={deletionTimeoutRef}
-                      key={data.address.toString()}
-                      watchpointData={data}
-                      onDelete={handleDeleteWatchpoint}
-                    />
+                  {Object.values(watchpoints).map((data: any) => (
+                    <WatchPointTable address={data.address} />
                   ))}
                 </Box>
               )}

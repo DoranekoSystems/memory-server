@@ -38,38 +38,29 @@ const StyledTableCell = styled(TableCell)<{ theme?: Theme }>(({ theme }) => ({
   color: theme?.palette?.common?.white || "#ffffff",
 }));
 
-const WatchPointTable = forwardRef(({ watchpointData, onDelete }, ref) => {
+const WatchPointTable = ({ address }) => {
   const memoryApi = useStore((state) => state.memoryApi);
-  const ipAddress = useStore((state) => state.ipAddress);
+  const watchpointHitsList = useWatchpointStore(
+    (state) => state.watchpointHitsList
+  );
   const _removeWatchpoint = useWatchpointStore(
     (state) => state.removeWatchpoint
   );
 
   const handleDelete = async () => {
-    const address = Number(watchpointData.address);
-    if (ref.current) {
-      clearTimeout(ref.current);
-    }
-
-    _removeWatchpoint(address);
-    onDelete(address);
     const ret = await memoryApi.removeWatchPoint(Number(address));
 
     if (ret.success) {
       _removeWatchpoint(address);
-
-      ref.current = setTimeout(() => {
-        ref.current = null;
-      }, 1000);
     } else if (ret.status == 500) {
       console.error("Failed to remove watchpoint");
       _removeWatchpoint(address);
-
-      ref.current = setTimeout(() => {
-        ref.current = null;
-      }, 1000);
     }
   };
+
+  const matchedWatchpointHits = watchpointHitsList.find(
+    (wh) => wh.watchpoint.address === address
+  );
 
   return (
     <Paper
@@ -88,10 +79,13 @@ const WatchPointTable = forwardRef(({ watchpointData, onDelete }, ref) => {
         }}
       >
         <div>
-          Watchpoint: 0x{watchpointData.address.toString(16).toUpperCase()}
-          <Typography variant="subtitle1">
-            Size: {watchpointData.size}, Type: {watchpointData.type}
-          </Typography>
+          Watchpoint: 0x{address.toString(16).toUpperCase()}
+          {matchedWatchpointHits && (
+            <Typography variant="subtitle1">
+              Size: {matchedWatchpointHits.watchpoint.size}, Type:{" "}
+              {matchedWatchpointHits.watchpoint.type}
+            </Typography>
+          )}
         </div>
         <Tooltip title="Delete Watchpoint">
           <IconButton
@@ -106,30 +100,36 @@ const WatchPointTable = forwardRef(({ watchpointData, onDelete }, ref) => {
           </IconButton>
         </Tooltip>
       </Typography>
-      <StyledTableContainer>
+      <TableContainer>
         <Table stickyHeader aria-label="watchpoint table">
           <TableHead>
             <TableRow>
               <StyledTableCell>Count</StyledTableCell>
               <StyledTableCell>Address</StyledTableCell>
-              <StyledTableCell>Opcode</StyledTableCell>
+              <StyledTableCell>Instruction</StyledTableCell>
             </TableRow>
           </TableHead>
           <TableBody>
-            {watchpointData.hits.map((hit, index) => (
-              <TableRow key={index}>
-                <TableCell>{hit.count}</TableCell>
-                <TableCell>
-                  0x{hit.address.toString(16).toUpperCase()}
-                </TableCell>
-                <TableCell>{hit.opcode}</TableCell>
+            {matchedWatchpointHits && matchedWatchpointHits.hits.length > 0 ? (
+              matchedWatchpointHits.hits.map((hit, index) => (
+                <TableRow key={index}>
+                  <TableCell>{hit.count}</TableCell>
+                  <TableCell>
+                    0x{hit.pcAddress.toString(16).toUpperCase()}
+                  </TableCell>
+                  <TableCell>{hit.opcode}</TableCell>
+                </TableRow>
+              ))
+            ) : (
+              <TableRow>
+                <TableCell colSpan={3} align="center"></TableCell>
               </TableRow>
-            ))}
+            )}
           </TableBody>
         </Table>
-      </StyledTableContainer>
+      </TableContainer>
     </Paper>
   );
-});
+};
 
 export default WatchPointTable;

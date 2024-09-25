@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from "react";
-import axios from "axios";
 import { useStore } from "@/lib/global-store";
 import {
   Card,
@@ -33,6 +32,7 @@ import {
   KeyboardArrowUp,
   Search as SearchIcon,
 } from "@mui/icons-material";
+import path from "path";
 
 const theme = createTheme({
   palette: {
@@ -50,6 +50,7 @@ const theme = createTheme({
     },
   },
 });
+
 const StyledTableContainer = styled(TableContainer)(({ theme }) => ({
   maxHeight: "70vh",
   "&::-webkit-scrollbar": {
@@ -98,25 +99,85 @@ const IndexCell = styled(StyledTableCell)({
   textAlign: "center",
 });
 
-const RegionRow = ({ region, index }) => (
-  <StyledTableRow>
-    <IndexCell style={{ width: "5%" }}>{index}</IndexCell>
-    <StyledTableCell style={{ width: "15%" }}>
-      0x{region.start_address.toUpperCase()}
-    </StyledTableCell>
-    <StyledTableCell style={{ width: "15%" }}>
-      0x{region.end_address.toUpperCase()}
-    </StyledTableCell>
-    <StyledTableCell style={{ width: "15%" }}>
-      {region.protection}
-    </StyledTableCell>
-    <StyledTableCell style={{ width: "50%" }}>
-      {region.file_path || ""}
-    </StyledTableCell>
-  </StyledTableRow>
-);
+function trimLeadingZeros(hexStr) {
+  if (hexStr.startsWith("0x")) {
+    hexStr = hexStr.slice(2);
+  }
+
+  const retStr = hexStr.replace(/^0+/, "");
+  if (retStr == "") {
+    return "0";
+  } else {
+    return retStr;
+  }
+}
+
+function getFileName(filePath) {
+  if (!filePath) return "";
+  const parts = filePath.split(/[\/\\]/);
+  return parts[parts.length - 1];
+}
+
+const RegionRow = ({ region, index }) => {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <StyledTableRow>
+        <IndexCell style={{ width: "5%" }}>{index}</IndexCell>
+        <StyledTableCell style={{ width: "15%" }}>
+          0x{trimLeadingZeros(region.start_address.toUpperCase())}
+        </StyledTableCell>
+        <StyledTableCell style={{ width: "15%" }}>
+          0x{trimLeadingZeros(region.end_address.toUpperCase())}
+        </StyledTableCell>
+        <StyledTableCell style={{ width: "15%" }}>
+          {region.protection}
+        </StyledTableCell>
+        <StyledTableCell style={{ width: "30%" }}>
+          {getFileName(region.file_path)}
+        </StyledTableCell>
+        <StyledTableCell style={{ width: "5%" }} align="center">
+          <IconButton
+            aria-label="expand row"
+            size="small"
+            onClick={() => setOpen(!open)}
+          >
+            {open ? <KeyboardArrowUp /> : <KeyboardArrowDown />}
+          </IconButton>
+        </StyledTableCell>
+      </StyledTableRow>
+      <TableRow>
+        <TableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={6}>
+          <Collapse in={open} timeout="auto" unmountOnExit>
+            <Box sx={{ margin: 1 }}>
+              <Typography variant="h6" gutterBottom component="div">
+                Details
+              </Typography>
+              <Table size="small" aria-label="details">
+                <TableBody>
+                  <TableRow>
+                    <TableCell component="th" scope="row">
+                      Full Path
+                    </TableCell>
+                    <TableCell
+                      style={{ wordBreak: "break-word", maxWidth: "300px" }}
+                    >
+                      {region.file_path || "N/A"}
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </Box>
+          </Collapse>
+        </TableCell>
+      </TableRow>
+    </>
+  );
+};
 
 export function Regions() {
+  const memoryApi = useStore((state) => state.memoryApi);
   const [regions, setRegions] = useState([]);
   const [filteredRegions, setFilteredRegions] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -135,9 +196,10 @@ export function Regions() {
   const fetchRegions = async () => {
     setLoading(true);
     setError(null);
-    try {
-      const response = await axios.get(`http://${ipAddress}:3030/enumregions`);
-      const regionData = response.data.regions;
+
+    const result = await memoryApi.enumRegions();
+    if (result.success) {
+      const regionData = result.data.regions;
       const formattedRegions = regionData
         .filter((region) => region.protection !== "---")
         .map((region, index) => ({
@@ -146,24 +208,34 @@ export function Regions() {
         }));
       setRegions(formattedRegions);
       setFilteredRegions(formattedRegions);
-    } catch (error) {
+    } else {
       console.error("Error fetching regions:", error);
       setError("Failed to fetch regions. Please try again.");
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
   };
-
-  useEffect(() => {
-    const filtered = regions.filter((region) =>
-      region.protection.toLowerCase().includes(filterValue.toLowerCase())
-    );
-    setFilteredRegions(filtered);
-  }, [filterValue, regions]);
 
   const handleFilterChange = (event) => {
     setFilterValue(event.target.value);
   };
+
+  const filterRegions = (regions, filterValue) => {
+    return regions.filter((region) => {
+      const protectionMatch = region.protection
+        .toLowerCase()
+        .split("")
+        .some((flag) => filterValue.toLowerCase().includes(flag));
+      const fileNameMatch = getFileName(region.file_path)
+        .toLowerCase()
+        .includes(filterValue.toLowerCase());
+      return protectionMatch || fileNameMatch;
+    });
+  };
+
+  useEffect(() => {
+    const filtered = filterRegions(regions, filterValue);
+    setFilteredRegions(filtered);
+  }, [filterValue, regions]);
 
   return (
     <ThemeProvider theme={theme}>
@@ -216,11 +288,14 @@ export function Regions() {
                       <StyledTableCell style={{ width: "15%" }}>
                         End
                       </StyledTableCell>
-                      <StyledTableCell style={{ width: "10%" }}>
+                      <StyledTableCell style={{ width: "15%" }}>
                         Protection
                       </StyledTableCell>
-                      <StyledTableCell style={{ width: "55%" }} align="center">
-                        Path
+                      <StyledTableCell style={{ width: "30%" }}>
+                        File Name
+                      </StyledTableCell>
+                      <StyledTableCell style={{ width: "5%" }} align="center">
+                        Details
                       </StyledTableCell>
                     </StyledTableRow>
                   </TableHead>

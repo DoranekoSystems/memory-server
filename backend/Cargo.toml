@@ -34,6 +34,7 @@ chrono = "0.4"
 percent-encoding = "2.3.1"
 clap = { version = "4.0", features = ["derive"] }
 colored = "2.0.0"
+capstone = "0.11"
 
 [[bin]]
 name = "memory-server"

@@ -20,6 +20,15 @@ import {
   TextField,
   Button,
   ButtonGroup,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  FormControlLabel,
+  FormControl,
+  FormLabel,
+  Radio,
+  RadioGroup,
 } from "@mui/material";
 import { styled } from "@mui/system";
 import { tableCellClasses } from "@mui/material/TableCell";
@@ -29,16 +38,19 @@ import {
   Edit as EditIcon,
   Save as SaveIcon,
   Cancel as CancelIcon,
+  BugReport as BugReportIcon,
+  Done as DoneIcon,
+  Check as CheckIcon,
+  CheckCircle as CheckCircleIcon,
 } from "@mui/icons-material";
-import axios from "axios";
 import {
   getByteLengthFromScanType,
   arrayBufferToLittleEndianHexString,
   convertFromLittleEndianHex,
 } from "@/lib/converter";
 import { isHexadecimal } from "@/lib/utils";
-import { readProcessMemory, resolveAddress } from "@/lib/api";
-import { useStore } from "@/lib/global-store";
+import { useStore, useWatchpointStore } from "@/lib/global-store";
+import { v4 as uuidv4 } from "uuid";
 
 const theme = createTheme({
   palette: {
@@ -87,6 +99,9 @@ const StyledTableRow = styled(TableRow)(({ theme }) => ({
 }));
 
 const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
+  const memoryApi = useStore((state) => state.memoryApi);
+  const targetOS = useStore((state) => state.targetOS);
+  const serverMode = useStore((state) => state.serverMode);
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const ipAddress = useStore((state) => state.ipAddress);
@@ -97,7 +112,9 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
   const [editedType, setEditedType] = useState("");
   const [editedValue, setEditedValue] = useState("");
   const [editedBase, setEditedBase] = useState({});
-
+  const [open, setOpen] = useState(false);
+  const [selectedSize, setSelectedSize] = useState("1");
+  const [selectedType, setSelectedType] = useState("r");
   const isRowFrozen = useCallback(
     (index) => frozenRows[index] || false,
     [frozenRows]
@@ -117,21 +134,29 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
         try {
           let resolveAddr = bookmark.address;
           if (!isHexadecimal(bookmark.query)) {
-            let tmp = await resolveAddress(ipAddress, bookmark.query);
-            resolveAddr = parseInt(BigInt(tmp).toString(16), 16);
+            let result = await memoryApi.resolveAddress(bookmark.query);
+            if (result.success) {
+              resolveAddr = result.data.address;
+            } else {
+              return;
+            }
           }
-          const memoryData = await readProcessMemory(
-            ipAddress,
+          const result = await memoryApi.readProcessMemory(
             resolveAddr,
             getByteLengthFromScanType(bookmark.type, bookmark.value)
           );
-          const updatedValue = memoryData
-            ? arrayBufferToLittleEndianHexString(memoryData)
-            : "???????";
+          if (result.success) {
+            const memoryData = result.data;
+            const updatedValue = memoryData
+              ? arrayBufferToLittleEndianHexString(memoryData)
+              : "???????";
 
-          const finalValue = isRowFrozen(index) ? bookmark.value : updatedValue;
+            const finalValue = isRowFrozen(index)
+              ? bookmark.value
+              : updatedValue;
 
-          return { ...bookmark, address: resolveAddr, value: finalValue };
+            return { ...bookmark, address: resolveAddr, value: finalValue };
+          }
         } catch (error) {
           console.error("Error updating memory value:", error);
           return bookmark;
@@ -199,21 +224,25 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
           }
           let resolveAddr = bookmark.address;
           if (!isHexadecimal(bookmark.query)) {
-            let tmp = await resolveAddress(ipAddress, bookmark.query);
-            resolveAddr = parseInt(BigInt(tmp).toString(16), 16);
+            const ret = await memoryApi.resolveAddress(bookmark.query);
+            if (ret.success) {
+              resolveAddr = ret.data.addres;
+            } else {
+              return;
+            }
           }
-          await axios.post(`http://${ipAddress}:3030/writememory`, {
-            address: resolveAddr,
-            buffer: Array.from(new Uint8Array(buffer)),
-          });
-
-          console.log(
-            `Memory frozen successfully for address: 0x${BigInt(
-              bookmark.address
-            )
-              .toString(16)
-              .toUpperCase()}`
-          );
+          const ret = await memoryApi.writeProcessMemory(resolveAddr, buffer);
+          if (ret.success) {
+            console.log(
+              `Memory frozen successfully for address: 0x${BigInt(
+                bookmark.address
+              )
+                .toString(16)
+                .toUpperCase()}`
+            );
+          } else {
+            console.log(ret.message);
+          }
 
           setFrozenValues((prev) => ({
             ...prev,
@@ -269,6 +298,25 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
     setEditingIndex(null);
   };
 
+  const handleSetWatchPoint = async (event, index) => {
+    const address = bookMarkLists[index].address;
+    const result = await memoryApi.setWatchPoint(
+      address,
+      parseInt(selectedSize),
+      selectedType
+    );
+    if (result.success) {
+      const uuid = uuidv4();
+      useWatchpointStore.getState().addWatchpoint({
+        address,
+        size: parseInt(selectedSize),
+        type: selectedType,
+        id: uuid,
+      });
+    }
+    setOpen(false);
+  };
+
   const handleSave = async (event, index) => {
     event.stopPropagation();
     const updatedBookmark = { ...bookMarkLists[index] };
@@ -279,7 +327,6 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
       valueToConvert = parseInt(editedValue, 16).toString();
     }
 
-    // Convert the edited value to little endian hex
     const buffer = new ArrayBuffer(
       getByteLengthFromScanType(editedType, valueToConvert)
     );
@@ -320,26 +367,27 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
         console.error("Unsupported type:", editedType);
         return;
     }
-
     updatedBookmark.value = arrayBufferToLittleEndianHexString(buffer);
-
-    // Update the memory
     try {
       let resolveAddr = updatedBookmark.address;
       if (!isHexadecimal(updatedBookmark.query)) {
-        let tmp = await resolveAddress(ipAddress, updatedBookmark.query);
-        resolveAddr = parseInt(BigInt(tmp).toString(16), 16);
+        const ret = await memoryApi.resolveAddress(updatedBookmark.query);
+        if (!ret.success) {
+          return;
+        }
+        resolveAddr = ret.data.address;
       }
-      await axios.post(`http://${ipAddress}:3030/writememory`, {
-        address: resolveAddr,
-        buffer: Array.from(new Uint8Array(buffer)),
-      });
 
-      console.log(
-        `Memory updated successfully for address: 0x${BigInt(resolveAddr)
-          .toString(16)
-          .toUpperCase()}`
-      );
+      const ret = await memoryApi.writeProcessMemory(resolveAddr, buffer);
+      if (ret.success) {
+        console.log(
+          `Memory updated successfully for address: 0x${BigInt(resolveAddr)
+            .toString(16)
+            .toUpperCase()}`
+        );
+      } else {
+        console.log(ret.message);
+      }
 
       setBookmarkLists((prevLists) =>
         prevLists.map((item, i) => (i === index ? updatedBookmark : item))
@@ -514,6 +562,23 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
                             <EditIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
+                        {targetOS === "ios" && serverMode == "normal" ? (
+                          <Tooltip title="Watch">
+                            <IconButton
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                {
+                                  setOpen(true);
+                                }
+                              }}
+                              size="small"
+                            >
+                              <BugReportIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        ) : (
+                          ""
+                        )}
                         <Tooltip title="Delete">
                           <IconButton
                             onClick={(e) => {
@@ -524,7 +589,90 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
                           >
                             <DeleteIcon fontSize="small" />
                           </IconButton>
-                        </Tooltip>
+                        </Tooltip>{" "}
+                        <Dialog open={open} onClose={() => {}}>
+                          <DialogTitle>
+                            Select watchpoint size and type
+                          </DialogTitle>
+                          <DialogContent>
+                            <FormControl component="fieldset">
+                              <FormLabel component="legend">Size</FormLabel>
+                              <RadioGroup
+                                value={selectedSize}
+                                onChange={(e) =>
+                                  setSelectedSize(e.target.value)
+                                }
+                              >
+                                <FormControlLabel
+                                  value="1"
+                                  control={<Radio />}
+                                  label="1"
+                                />
+                                <FormControlLabel
+                                  value="2"
+                                  control={<Radio />}
+                                  label="2"
+                                />
+                                <FormControlLabel
+                                  value="4"
+                                  control={<Radio />}
+                                  label="4"
+                                />
+                                <FormControlLabel
+                                  value="8"
+                                  control={<Radio />}
+                                  label="8"
+                                />
+                              </RadioGroup>
+
+                              <FormLabel component="legend">Type</FormLabel>
+                              <RadioGroup
+                                value={selectedType}
+                                onChange={(e) =>
+                                  setSelectedType(e.target.value)
+                                }
+                              >
+                                <FormControlLabel
+                                  value="r"
+                                  control={<Radio />}
+                                  label="Read"
+                                />
+                                <FormControlLabel
+                                  value="w"
+                                  control={<Radio />}
+                                  label="Write"
+                                />
+                                <FormControlLabel
+                                  value="a"
+                                  control={<Radio />}
+                                  label="Access"
+                                />
+                              </RadioGroup>
+                            </FormControl>
+                          </DialogContent>
+                          <DialogActions>
+                            <Tooltip title="Set">
+                              <IconButton
+                                onClick={(e) => handleSetWatchPoint(e, index)}
+                                size="small"
+                              >
+                                <CheckCircleIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Cancel">
+                              <IconButton
+                                onClick={(e) => {
+                                  {
+                                    setOpen(false);
+                                  }
+                                }}
+                                size="small"
+                              >
+                                <CancelIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </DialogActions>
+                        </Dialog>
                       </>
                     )}
                   </StyledTableCell>

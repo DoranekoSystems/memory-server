@@ -1,125 +1,260 @@
-import axios from "axios";
+import axios, { AxiosResponse } from "axios";
 
-export async function getMemoryRegions(
-  ipAddress: string,
-  protection: string[]
-) {
-  try {
-    const response = await axios.get(`http://${ipAddress}:3030/enumregions`);
+export class MemoryApi {
+  ipAddress: string;
+  baseUrl: string;
+
+  constructor(ipAddress: string) {
+    this.ipAddress = ipAddress;
+    this.baseUrl = `http://${ipAddress}:3030/`;
+  }
+
+  handleResponse(response: AxiosResponse, onSuccess?: (data: any) => any) {
     if (response.status === 200) {
-      const regions = response.data.regions;
-      const filteredRegions = regions.filter((region: any) => {
-        const hasReadPermission = protection.includes("r+");
-        const hasWritePermission = protection.includes("w+");
-        const hasExecutePermission = protection.includes("x+");
-        const hasNegativeReadPermission = protection.includes("r-");
-        const hasNegativeWritePermission = protection.includes("w-");
-        const hasNegativeExecutePermission = protection.includes("x-");
+      const data = onSuccess ? onSuccess(response.data) : response.data;
+      return {
+        success: true,
+        status: 200,
+        data: data,
+        message: "",
+      };
+    } else {
+      return {
+        success: false,
+        status: response.status,
+        data: null,
+        message: `Unexpected status code: ${response.status}`,
+      };
+    }
+  }
 
-        const regionProtection = region.protection.toLowerCase();
+  handleError(error: any) {
+    return {
+      success: false,
+      status: -1,
+      data: null,
+      message: `Error: ${error.message}`,
+    };
+  }
 
-        let f1 = true;
-        let f2 = true;
-        let f3 = true;
+  async readProcessMemory(address: Number, size: Number) {
+    try {
+      const response = await axios.get(this.baseUrl + "memory", {
+        params: { address, size },
+        responseType: "arraybuffer",
+      });
+      return this.handleResponse(response);
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
 
-        if (regionProtection.includes("r")) {
-          if (hasReadPermission) {
-            f1 = true;
-          }
-          if (hasNegativeReadPermission) {
-            f1 = false;
-          }
-        } else {
-          if (hasReadPermission) {
-            f1 = false;
-          }
-          if (hasNegativeReadPermission) {
-            f1 = true;
-          }
-        }
+  async writeProcessMemory(address: Number, buffer: any) {
+    try {
+      const response = await axios.post(this.baseUrl + "memory", {
+        address,
+        buffer: Array.from(new Uint8Array(buffer)),
+      });
+      return this.handleResponse(response);
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
 
-        if (regionProtection.includes("w")) {
-          if (hasWritePermission) {
-            f2 = true;
-          }
-          if (hasNegativeWritePermission) {
-            f2 = false;
-          }
-        } else {
-          if (hasWritePermission) {
-            f2 = false;
-          }
-          if (hasNegativeWritePermission) {
-            f2 = true;
-          }
-        }
-
-        if (regionProtection.includes("x")) {
-          if (hasExecutePermission) {
-            f3 = true;
-          }
-          if (hasNegativeExecutePermission) {
-            f3 = false;
-          }
-        } else {
-          if (hasExecutePermission) {
-            f3 = false;
-          }
-          if (hasNegativeExecutePermission) {
-            f3 = true;
-          }
-        }
-
-        return f1 && f2 && f3;
+  async memoryScan(
+    pattern,
+    address_ranges,
+    find_type,
+    data_type,
+    align,
+    scan_id,
+    return_as_json,
+    do_suspend
+  ) {
+    try {
+      const response = await axios.post(this.baseUrl + "memoryscan", {
+        pattern,
+        address_ranges,
+        find_type,
+        data_type,
+        align,
+        scan_id,
+        return_as_json,
+        do_suspend,
       });
 
-      return filteredRegions;
-    } else {
-      console.error(`Enumerate regions failed: ${response.status}`);
-      return [];
+      return this.handleResponse(response);
+    } catch (error) {
+      return this.handleError(error);
     }
-  } catch (error) {
-    console.error("Error enumerating regions:", error);
-    return [];
   }
-}
 
-export async function readProcessMemory(
-  ipAddress: String,
-  address: Number,
-  size: Number
-) {
-  try {
-    const response = await axios.get(`http://${ipAddress}:3030/readmemory`, {
-      params: { address, size },
-      responseType: "arraybuffer",
-    });
-    if (response.status === 200) {
-      const memoryData = response.data;
-      if (memoryData.byteLength === 0) {
-        return null;
-      } else {
-        return response.data;
-      }
-    } else {
-      console.error("Unexpected status code:", response.status);
+  async memoryFilter(
+    pattern,
+    data_type,
+    scan_id,
+    filter_method,
+    return_as_json,
+    do_suspend
+  ) {
+    try {
+      const response = await axios.post(this.baseUrl + "memoryfilter", {
+        pattern,
+        data_type,
+        scan_id,
+        filter_method,
+        return_as_json,
+        do_suspend,
+      });
+      return this.handleResponse(response);
+    } catch (error) {
+      return this.handleError(error);
     }
-  } catch (error) {
-    console.error("Error in readProcessMemory:", error);
   }
-}
 
-export async function resolveAddress(ipAddress: String, query: String) {
-  try {
-    const response = await axios.get(`http://${ipAddress}:3030/resolveaddr`, {
-      params: { query },
-    });
-    if (response.status === 200) {
-      return response.data.address.toString(10);
-    } else {
-      console.error("Unexpected status code:", response.status);
+  async resolveAddress(query: String) {
+    try {
+      const response = await axios.get(this.baseUrl + "resolveaddr", {
+        params: { query },
+      });
+      return this.handleResponse(response);
+    } catch (error) {
+      return this.handleError(error);
     }
-  } catch (error) {
-    console.error("Error in resolveAddress:", error);
+  }
+
+  async getExceptionInfo() {
+    try {
+      const response = await axios.get(this.baseUrl + "exceptioninfo");
+      return this.handleResponse(response);
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  async setWatchPoint(address: number, size: number, type: string) {
+    try {
+      const response = await axios.post(this.baseUrl + "watchpoint", {
+        address,
+        size,
+        _type: type,
+      });
+      return this.handleResponse(response);
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  async setBreakPoint(address: number, hit_count: number) {
+    try {
+      const response = await axios.post(this.baseUrl + "breakpoint", {
+        address,
+        hit_count,
+      });
+      return this.handleResponse(response);
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  async removeBreakPoint(address: number) {
+    try {
+      const response = await axios.delete(this.baseUrl + "breakpoint", {
+        data: { address: address },
+      });
+      return this.handleResponse(response);
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  async removeWatchPoint(address: number) {
+    try {
+      const response = await axios.delete(this.baseUrl + "watchpoint", {
+        data: { address: address },
+      });
+      return this.handleResponse(response);
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  async exploreDirectory(encodedPath: String) {
+    try {
+      const response = await axios.get(
+        this.baseUrl + `exploredirectory?path=${encodedPath}&max_depth=1`
+      );
+      return this.handleResponse(response);
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  async readFile(fullPath: String) {
+    try {
+      const response = await axios.get(this.baseUrl + "file", {
+        params: { path: fullPath },
+        responseType: "blob",
+      });
+      this.handleResponse(response);
+    } catch (error) {
+      this.handleError(error);
+    }
+  }
+
+  async enumModules() {
+    try {
+      const response = await axios.get(this.baseUrl + "modules");
+      return this.handleResponse(response);
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  async enumRegions() {
+    try {
+      const response = await axios.get(this.baseUrl + "regions");
+      return this.handleResponse(response);
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  async openProcess(pid: Number) {
+    try {
+      const response = await axios.post(this.baseUrl + "process", {
+        pid,
+      });
+      return this.handleResponse(response);
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  async enumProcesses() {
+    try {
+      const response = await axios.get(this.baseUrl + "processes");
+      return this.handleResponse(response);
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  async fetchApplicationInfo(pid: Number) {
+    try {
+      const response = await axios.get(this.baseUrl + `appinfo?pid=${pid}`);
+      return this.handleResponse(response);
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  async getServerInfo() {
+    try {
+      const response = await axios.get(this.baseUrl + "serverinfo");
+      return this.handleResponse(response);
+    } catch (error) {
+      return this.handleError(error);
+    }
   }
 }

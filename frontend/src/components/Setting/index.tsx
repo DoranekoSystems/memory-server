@@ -11,6 +11,7 @@ import { Input } from "@/components/common/Input";
 import { Button } from "@/components/common/Button";
 import { useState, useEffect, useRef } from "react";
 import { useStore } from "@/lib/global-store";
+import { MemoryApi } from "@/lib/api";
 
 const InfoItem = ({ label, value }) => (
   <div className="mb-4 last:mb-0">
@@ -33,6 +34,8 @@ export function Setting() {
   const targetOS = useStore((state) => state.targetOS);
   const setTargetOS = useStore((state) => state.setTargetOS);
   const setIpAddress = useStore((state) => state.setIpAddress);
+  const memoryApi = useStore((state) => state.memoryApi);
+  const setMemoryApi = useStore((state) => state.setMemoryApi);
 
   const [processes, setProcesses] = useState([]);
   const [selectedProcess, setSelectedProcess] = useState(null);
@@ -44,21 +47,31 @@ export function Setting() {
     setSelectedProcess(process);
   };
 
+  useEffect(() => {
+    if (memoryApi != null) {
+      const setupApiCalls = async () => {
+        await getServerInfo();
+        await fetchProcesses();
+      };
+      setupApiCalls();
+    }
+  }, [memoryApi]);
+
   const setup = async () => {
-    await getServerInfo();
-    await fetchProcesses();
+    if (inputRef.current == null) {
+      return null;
+    }
+    const ip = inputRef.current.value;
+    setMemoryApi(new MemoryApi(ip));
   };
 
   const getServerInfo = async () => {
     if (inputRef.current == null) {
       return null;
     }
-    const ip = inputRef.current.value;
-    const base_url = `http://${ip}:3030`;
-    const serverinfo_url = `${base_url}/serverinfo`;
-    const response = await fetch(serverinfo_url);
-    if (response.status == 200) {
-      const data = await response.json();
+    const result = await memoryApi.getServerInfo();
+    if (result.success) {
+      const data = result.data;
       setServerMode(data.mode);
       setTargetOS(data.target_os);
       setServerArch(data.arch);
@@ -69,68 +82,34 @@ export function Setting() {
   };
 
   const fetchProcesses = async () => {
-    if (inputRef.current == null) {
-      return null;
+    const result = await memoryApi.enumProcesses();
+
+    if (result.success) {
+      const sortedData = result.data.sort((a: any, b: any) => a.pid - b.pid);
+      setIpAddress(memoryApi.ipAddress);
+      setProcesses(sortedData);
     }
-    const ip = inputRef.current.value;
-    const base_url = `http://${ip}:3030`;
-    const enumprocess_url = `${base_url}/enumprocess`;
-    const response = await fetch(enumprocess_url);
-    const data = await response.json();
-    const sortedData = data.sort((a: any, b: any) => a.pid - b.pid);
-    setIpAddress(ip);
-    setProcesses(sortedData);
   };
 
   const openProcess = async () => {
-    if (inputRef.current == null) {
-      return null;
-    }
-    const ip = inputRef.current.value;
-    const openProcessUrl = `http://${ip}:3030/openprocess`;
-    const openProcessPayload = { pid: selectedProcess.pid };
+    if (selectedProcess == null) return;
+    const result = await memoryApi.openProcess(selectedProcess.pid);
 
-    try {
-      const response = await fetch(openProcessUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(openProcessPayload),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
+    if (result.success) {
       setOpenedProcess(selectedProcess);
-      await fetchApplicationInfo(ip, selectedProcess.pid); // Fetch Application Info after process is opened
+      await fetchApplicationInfo(selectedProcess.pid); // Fetch Application Info after process is opened
       return true;
-    } catch (error) {
-      console.error("Error during fetching:", error);
-      return false;
     }
   };
 
-  const fetchApplicationInfo = async (ip, pid) => {
-    const applicationInfoUrl = `http://${ip}:3030/getappinfo?pid=${pid}`;
-    try {
-      const response = await fetch(applicationInfoUrl, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      });
-      const data = await response.json();
+  const fetchApplicationInfo = async (pid) => {
+    const result = await memoryApi.fetchApplicationInfo(pid);
 
-      // Parse the 'info' field if it is a stringified JSON
-      if (typeof data.info === "string") {
-        const parsedInfo = JSON.parse(data.info);
-        setApplicationInfo(parsedInfo); // Store the parsed info object
-      } else {
-        setApplicationInfo(data.info);
-      }
-    } catch (error) {
-      console.error("Error fetching application info:", error);
+    if (typeof result.data.info === "string") {
+      const parsedInfo = JSON.parse(result.data.info);
+      setApplicationInfo(parsedInfo);
+    } else {
+      setApplicationInfo(result.data.info);
     }
   };
 

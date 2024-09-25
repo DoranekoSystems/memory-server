@@ -6,7 +6,7 @@ use log::LevelFilter;
 use std::io::Write;
 use warp::log::Info;
 
-static EXCLUDED_PATHS: &[&str] = &["/_next", "/readmemory"];
+static EXCLUDED_PATHS: &[&str] = &["/_next", "/exceptioninfo"];
 static EXCLUDED_EXTENSIONS: &[&str] = &[
     ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".webp", ".bmp", ".tiff",
 ];
@@ -22,7 +22,6 @@ pub fn init_log() {
                 log::Level::Debug => ("DEBUG", Color::Blue),
                 log::Level::Trace => ("TRACE", Color::Magenta),
             };
-
             let args = record.args().to_string();
             let colored_args = if args.contains("GET")
                 || args.contains("POST")
@@ -35,15 +34,14 @@ pub fn init_log() {
                         "{} {} {}",
                         parts[0].color(Color::Cyan),
                         parts[1].color(Color::Yellow),
-                        parts[2]
+                        color_native_prefix(parts[2])
                     )
                 } else {
-                    args
+                    color_native_prefix(&args)
                 }
             } else {
-                args
+                color_native_prefix(&args)
             };
-
             writeln!(
                 buf,
                 "{} [{}] {}",
@@ -60,11 +58,29 @@ pub fn init_log() {
         .init();
 }
 
+fn color_native_prefix(message: &str) -> String {
+    if message.starts_with("[NATIVE]") {
+        let parts: Vec<&str> = message.splitn(2, ']').collect();
+        if parts.len() == 2 {
+            format!("{}{}", "[NATIVE]".color(Color::BrightRed), parts[1])
+        } else {
+            message.to_string()
+        }
+    } else {
+        message.to_string()
+    }
+}
+
 pub fn http_log(info: Info) {
     if EXCLUDED_PATHS
         .iter()
         .any(|prefix| info.path().starts_with(prefix))
     {
+        return;
+    }
+
+    // readprocessmemory
+    if info.path() == "/memory" && info.method() == "GET" {
         return;
     }
     if EXCLUDED_EXTENSIONS

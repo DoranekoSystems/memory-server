@@ -1,4 +1,3 @@
-import axios from "axios";
 import { useState, useEffect, useRef } from "react";
 import { useStore } from "../../lib/global-store";
 import {
@@ -26,11 +25,11 @@ import {
   convertToLittleEndianHex,
 } from "@/lib/converter";
 
-import { getMemoryRegions, readProcessMemory, resolveAddress } from "@/lib/api";
-
 import { isHexadecimal } from "@/lib/utils";
+import { resolve } from "path";
 
 export function Bookmark({ currentPage }) {
+  const memoryApi = useStore((state) => state.memoryApi);
   const [addressRanges, setAddressRanges] = useState<[bigint, bigint][]>([
     [BigInt(0), BigInt("0x7FFFFFFFFFFFFF")],
   ]);
@@ -91,15 +90,19 @@ export function Bookmark({ currentPage }) {
 
     for (const address of selectedAddresses) {
       try {
-        await axios.post(`http://${ipAddress}:3030/writememory`, {
-          address: address,
-          buffer: Array.from(buffer),
-        });
-        console.log(
-          `Memory patched successfully for address: 0x${BigInt(address)
-            .toString(16)
-            .toUpperCase()}`
+        const ret = await memoryApi.writeProcessMemory(
+          address,
+          Array.from(buffer)
         );
+        if (ret.success) {
+          console.log(
+            `Memory patched successfully for address: 0x${BigInt(address)
+              .toString(16)
+              .toUpperCase()}`
+          );
+        } else {
+          console.log(ret.message);
+        }
       } catch (error) {
         console.error("Error patching memory:", error);
       }
@@ -130,10 +133,14 @@ export function Bookmark({ currentPage }) {
   };
 
   const handleAddNewBookmark = async () => {
-    let resolveAddr = newAddress;
-    if (!isHexadecimal(newAddress)) {
-      let tmp = await resolveAddress(ipAddress, newAddress);
-      resolveAddr = BigInt(tmp).toString(16);
+    let resolveAddr = newAddress.trim();
+    if (!isHexadecimal(resolveAddr)) {
+      let ret = await memoryApi.resolveAddress(resolveAddr);
+      if (ret.success) {
+        resolveAddr = ret.data.address.toString(16);
+      } else {
+        return;
+      }
     }
     setBookmarkLists([
       ...bookmarkLists,

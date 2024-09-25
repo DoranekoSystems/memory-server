@@ -35,7 +35,7 @@ const ScanTable = forwardRef((props, ref) => {
     currentPage,
   } = props;
   const [isVisible, setIsVisible] = useState(currentPage === "scanner");
-
+  const memoryApi = useStore((state) => state.memoryApi);
   useEffect(() => {
     setIsVisible(currentPage === "scanner");
   }, [currentPage]);
@@ -135,20 +135,22 @@ const ScanTable = forwardRef((props, ref) => {
         const result = updatedResults[i];
         if (result && result.address) {
           try {
-            const memoryData = await readProcessMemory(
-              ipAddress,
+            const ret = await memoryApi.readProcessMemory(
               result.address,
               getByteLengthFromScanType(dataType, result.value)
             );
-            let updatedValue = "";
-            if (memoryData == null) {
-              updatedValue = "???????";
-            } else {
-              updatedValue = arrayBufferToLittleEndianHexString(memoryData);
-            }
-            if (updatedValue !== result.value) {
-              updatedResults[i] = { ...result, value: updatedValue };
-              hasUpdates = true;
+            if (ret.success) {
+              const memoryData = ret.data;
+              let updatedValue = "";
+              if (memoryData == null) {
+                updatedValue = "???????";
+              } else {
+                updatedValue = arrayBufferToLittleEndianHexString(memoryData);
+              }
+              if (updatedValue !== result.value) {
+                updatedResults[i] = { ...result, value: updatedValue };
+                hasUpdates = true;
+              }
             }
           } catch (error) {
             console.error("Error updating memory value:", error);

@@ -83,7 +83,11 @@ extern "C" bool resume_process(pid_t pid);
 
 extern "C" ModuleInfo *enummodule_native(pid_t pid, size_t *count);
 
-extern "C" void native_log(int level, const char *message);
 int debug_log(LogLevel level, const char *format, ...);
 
+// Rust functions
+extern "C" void native_log(int level, const char *message);
+extern "C" void send_register_json(const char *register_json, pid_t pid);
+char *disassemble(const uint8_t *bytecode, size_t length);
+void free_string(char *s);
 #endif

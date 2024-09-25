@@ -7,6 +7,8 @@ use std::net::IpAddr;
 mod allocator;
 mod api;
 mod logger;
+mod native_bridge;
+mod request;
 mod serve;
 mod util;
 

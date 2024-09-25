@@ -5,6 +5,7 @@ import { Setting } from "@/components/Setting";
 import { Scanner } from "@/components/Scanner";
 import { Bookmark } from "@/components/Bookmark";
 import { MemoryView } from "@/components/MemoryView";
+import { Debugger } from "@/components/Debugger";
 import { Information } from "@/components/Information";
 import { FileView } from "@/components/FileExplorer";
 import { Header } from "@/components/Header";
@@ -19,6 +20,7 @@ export default function Home() {
     scanner: Scanner,
     bookmark: Bookmark,
     memoryview: MemoryView,
+    debugger: Debugger,
     information: Information,
     fileexplorer: FileView,
   };

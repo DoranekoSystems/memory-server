@@ -7,6 +7,8 @@ use warp::Filter;
 
 use crate::api;
 use crate::logger;
+use crate::native_bridge;
+use crate::request;
 
 pub async fn serve(mode: i32, host: IpAddr, port: u16) {
     let pid_state = Arc::new(Mutex::new(None));
@@ -14,22 +16,22 @@ pub async fn serve(mode: i32, host: IpAddr, port: u16) {
     let cors = warp::cors()
         .allow_any_origin()
         .allow_headers(vec!["*", "Content-Type"])
-        .allow_methods(vec!["GET", "POST", "OPTIONS"]);
+        .allow_methods(vec!["GET", "POST", "DELETE", "OPTIONS"]);
 
     let static_files = warp::path::tail()
         .map(|tail: Tail| tail.as_str().to_string())
         .and_then(serve_static);
 
-    let enum_process = warp::path!("enumprocess")
+    let enum_process = warp::path!("processes")
         .and(warp::get())
         .and_then(api::enumerate_process_handler);
 
-    let enum_module = warp::path!("enummodule")
+    let enum_module = warp::path!("modules")
         .and(warp::get())
         .and(api::with_state(pid_state.clone()))
         .and_then(|pid_state| async move { api::enummodule_handler(pid_state).await });
 
-    let open_process = warp::path!("openprocess")
+    let open_process = warp::path!("process")
         .and(warp::post())
         .and(warp::body::json())
         .and(api::with_state(pid_state.clone()))
@@ -37,29 +39,29 @@ pub async fn serve(mode: i32, host: IpAddr, port: u16) {
             api::open_process_handler(pid_state, open_process).await
         });
 
-    let read_memory = warp::path!("readmemory")
+    let read_memory = warp::path!("memory")
         .and(warp::get())
-        .and(warp::query::<api::ReadMemoryRequest>())
+        .and(warp::query::<request::ReadMemoryRequest>())
         .and(api::with_state(pid_state.clone()))
         .and_then(|read_memory_request, pid_state| async move {
             api::read_memory_handler(pid_state, read_memory_request).await
         });
 
-    let read_memory_multiple = warp::path!("readmemories")
-        .and(warp::post())
-        .and(warp::body::content_length_limit(1024 * 1024 * 10)) // 10MB
-        .and(warp::body::json::<Vec<api::ReadMemoryRequest>>())
-        .and(api::with_state(pid_state.clone()))
-        .and_then(|read_memory_requests, pid_state| async move {
-            api::read_memory_multiple_handler(pid_state, read_memory_requests).await
-        });
-
-    let write_memory = warp::path!("writememory")
+    let write_memory = warp::path!("memory")
         .and(warp::post())
         .and(warp::body::json())
         .and(api::with_state(pid_state.clone()))
         .and_then(|write_memory, pid_state| async move {
             api::write_memory_handler(pid_state, write_memory).await
+        });
+
+    let read_memory_multiple = warp::path!("memories")
+        .and(warp::post())
+        .and(warp::body::content_length_limit(1024 * 1024 * 10)) // 10MB
+        .and(warp::body::json::<Vec<request::ReadMemoryRequest>>())
+        .and(api::with_state(pid_state.clone()))
+        .and_then(|read_memory_requests, pid_state| async move {
+            api::read_memory_multiple_handler(pid_state, read_memory_requests).await
         });
 
     let memory_scan = warp::path!("memoryscan")
@@ -78,14 +80,14 @@ pub async fn serve(mode: i32, host: IpAddr, port: u16) {
             api::memory_filter_handler(pid_state, filter_request).await
         });
 
-    let enum_regions = warp::path!("enumregions")
+    let enum_regions = warp::path!("regions")
         .and(warp::get())
         .and(api::with_state(pid_state.clone()))
         .and_then(|pid_state| async move { api::enumerate_regions_handler(pid_state).await });
 
     let resolve_addr = warp::path!("resolveaddr")
         .and(warp::get())
-        .and(warp::query::<api::ResolveAddrRequest>())
+        .and(warp::query::<request::ResolveAddrRequest>())
         .and(api::with_state(pid_state.clone()))
         .and_then(|resolve_addr_request, pid_state| async move {
             api::resolve_addr_handler(pid_state, resolve_addr_request).await
@@ -93,19 +95,19 @@ pub async fn serve(mode: i32, host: IpAddr, port: u16) {
 
     let explore_directory = warp::path!("exploredirectory")
         .and(warp::get())
-        .and(warp::query::<api::ExploreDirectoryRequest>())
+        .and(warp::query::<request::ExploreDirectoryRequest>())
         .and_then(|explore_directory_request| async move {
             api::explore_directory_handler(explore_directory_request).await
         });
 
-    let read_file = warp::path!("readfile")
+    let read_file = warp::path!("file")
         .and(warp::get())
-        .and(warp::query::<api::ReadFileRequest>())
+        .and(warp::query::<request::ReadFileRequest>())
         .and_then(
             |read_file_request| async move { api::read_file_handler(read_file_request).await },
         );
 
-    let get_app_info = warp::path!("getappinfo")
+    let get_app_info = warp::path!("appinfo")
         .and(warp::get())
         .and(api::with_state(pid_state.clone()))
         .and_then(|pid_state| async move { api::get_app_info_handler(pid_state).await });
@@ -113,6 +115,42 @@ pub async fn serve(mode: i32, host: IpAddr, port: u16) {
     let server_info = warp::path!("serverinfo")
         .and(warp::get())
         .and_then(api::server_info_handler);
+
+    let set_watchpoint = warp::path!("watchpoint")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(api::with_state(pid_state.clone()))
+        .and_then(|set_watchpoint_request, pid_state| async move {
+            api::set_watchpoint_handler(pid_state, set_watchpoint_request).await
+        });
+
+    let remove_watchpoint = warp::path!("watchpoint")
+        .and(warp::delete())
+        .and(warp::body::json())
+        .and(api::with_state(pid_state.clone()))
+        .and_then(|remove_watchpoint_request, pid_state| async move {
+            api::remove_watchpoint_handler(pid_state, remove_watchpoint_request).await
+        });
+
+    let set_breakpoint = warp::path!("breakpoint")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(api::with_state(pid_state.clone()))
+        .and_then(|set_breakpoint_request, pid_state| async move {
+            api::set_breakpoint_handler(pid_state, set_breakpoint_request).await
+        });
+
+    let remove_breakpoint = warp::path!("breakpoint")
+        .and(warp::delete())
+        .and(warp::body::json())
+        .and(api::with_state(pid_state.clone()))
+        .and_then(|remove_breakpoint_request, pid_state| async move {
+            api::remove_breakpoint_handler(pid_state, remove_breakpoint_request).await
+        });
+
+    let get_exception_info = warp::path!("exceptioninfo")
+        .and(warp::get())
+        .and_then(api::get_exception_info_handler);
 
     let routes = open_process
         .or(read_memory)
@@ -128,11 +166,16 @@ pub async fn serve(mode: i32, host: IpAddr, port: u16) {
         .or(read_file)
         .or(get_app_info)
         .or(server_info)
+        .or(set_watchpoint)
+        .or(remove_watchpoint)
+        .or(set_breakpoint)
+        .or(remove_breakpoint)
+        .or(get_exception_info)
         .or(static_files)
         .with(cors)
         .with(warp::log::custom(logger::http_log));
 
-    api::native_api_init(mode);
+    native_bridge::native_api_init(mode);
     warp::serve(routes).run((host, port)).await;
 }
 

@@ -32,7 +32,6 @@ import {
   ExpandMore as ExpandMoreIcon,
   Home as HomeIcon,
 } from "@mui/icons-material";
-import axios from "axios";
 import path from "path-browserify";
 
 const theme = createTheme({
@@ -95,7 +94,6 @@ const FileItem = ({
   onContextMenu,
 }) => {
   const [loading, setLoading] = useState(false);
-
   const handleContextMenu = (event) => {
     event.preventDefault();
     onContextMenu(event, item);
@@ -229,6 +227,7 @@ const FileList = ({
   );
 };
 export function FileView() {
+  const memoryApi = useStore((state) => state.memoryApi);
   const [currentPath, setCurrentPath] = useState("/");
   const [inputPath, setInputPath] = useState("/");
   const [fileStructure, setFileStructure] = useState([]);
@@ -313,10 +312,12 @@ export function FileView() {
         ? normalizeWindowsPath(directoryPath)
         : directoryPath;
     const encodedPath = encodeURIComponent(normalizedPath);
-    const response = await axios.get(
-      `http://${ipAddress}:3030/exploredirectory?path=${encodedPath}&max_depth=1`
-    );
-    return response.data;
+    const ret = await memoryApi.exploreDirectory(encodedPath);
+    if (ret.success) {
+      return ret.data;
+    } else {
+      console.log(ret.message);
+    }
   };
 
   const buildFileStructure = useCallback((items) => {
@@ -400,19 +401,17 @@ export function FileView() {
   const handleDownloadFile = useCallback(async () => {
     if (selectedItem && selectedItem.item_type === "file") {
       const fullPath = findItemPath(fileStructure, selectedItem, currentPath);
-      try {
-        const response = await axios.get(`http://${ipAddress}:3030/readfile`, {
-          params: { path: fullPath },
-          responseType: "blob",
-        });
-        const url = window.URL.createObjectURL(new Blob([response.data]));
+
+      const ret = await memoryApi.readFile(fullPath);
+      if (ret.success) {
+        const url = window.URL.createObjectURL(new Blob([ret.data]));
         const link = document.createElement("a");
         link.href = url;
         link.setAttribute("download", selectedItem.name);
         document.body.appendChild(link);
         link.click();
         link.parentNode.removeChild(link);
-      } catch (error) {
+      } else {
         console.error("Error downloading file:", error);
       }
     }

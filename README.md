@@ -40,7 +40,7 @@ http://{iPhone's ip}:3030/index.html
 
 The following top page will be displayed.
 
-<img width="500" alt="img1" src="https://github.com/DoranekoSystems/memory-server/assets/96031346/01d846b5-df98-4925-9b3c-b63d66b10d89">
+<img width="500" alt="img1" src="https://github.com/user-attachments/assets/2998770f-fcf7-4cdf-9272-5e76753029e4">
 
 ### Setting
 
@@ -52,7 +52,20 @@ Next, select a process and press the 「Open Process」 button.
 
 ### Memory Scan
 
-<img width="500" alt="img3" src="https://github.com/DoranekoSystems/memory-server/assets/96031346/f230d850-646f-4fd9-8ee4-4265f2e20e1a">
+<img width="500" alt="img3" src="https://github.com/user-attachments/assets/78bdac66-7ed4-440d-b5af-0e7e23f74f0b">
+
+### Debugger
+
+Only watchpoints are supported in the iOS environment.  
+
+<img width="500" alt="img4" src="https://github.com/user-attachments/assets/957910ec-0506-4951-b68b-1476764a3ae1">
+
+### File Explorer
+
+The feature allows viewing and downloading files on the device
+
+<img width="500" alt="img4" src="https://github.com/user-attachments/assets/9873a16a-57f4-42a5-8244-2cdeaf1278a2">
+
 
 ## Android
 

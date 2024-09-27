@@ -11,6 +11,19 @@ static EXCLUDED_EXTENSIONS: &[&str] = &[
     ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".webp", ".bmp", ".tiff",
 ];
 
+fn color_native_prefix(message: &str) -> String {
+    if message.starts_with("[NATIVE]") {
+        let parts: Vec<&str> = message.splitn(2, ']').collect();
+        if parts.len() == 2 {
+            format!("{}{}", "[NATIVE]".color(Color::BrightRed), parts[1])
+        } else {
+            message.to_string()
+        }
+    } else {
+        message.to_string()
+    }
+}
+
 pub fn init_log() {
     Builder::new()
         .format(|buf, record| {
@@ -56,19 +69,6 @@ pub fn init_log() {
         .filter_level(LevelFilter::Info)
         .parse_env(Env::default().default_filter_or("info"))
         .init();
-}
-
-fn color_native_prefix(message: &str) -> String {
-    if message.starts_with("[NATIVE]") {
-        let parts: Vec<&str> = message.splitn(2, ']').collect();
-        if parts.len() == 2 {
-            format!("{}{}", "[NATIVE]".color(Color::BrightRed), parts[1])
-        } else {
-            message.to_string()
-        }
-    } else {
-        message.to_string()
-    }
 }
 
 pub fn http_log(info: Info) {

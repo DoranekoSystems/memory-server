@@ -41,7 +41,7 @@ name = "memory-server"
 path = "src/main.rs"
 
 [lib]
-name = "memory_spy"
+name = "memory_inspector"
 crate-type = ["cdylib"]
 
 [lints.rust]

@@ -8,19 +8,25 @@ use memchr::memmem;
 use percent_encoding::percent_decode_str;
 use rayon::prelude::*;
 use regex::bytes::Regex;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::json;
 use serde_json::Value;
 use std::collections::HashMap;
+use tide::http::cache;
 
 use log::{debug, error, info, trace, warn};
+use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::env;
 use std::ffi::CStr;
 use std::ffi::CString;
-use std::io::Error;
-use std::io::{BufRead, BufReader};
+use std::fs::{self, File, OpenOptions};
+use std::io::Read;
+use std::io::Write;
+use std::io::{BufRead, BufReader, BufWriter};
+use std::mem::size_of;
 use std::panic;
+use std::path::{Path, PathBuf};
 use std::process;
 use std::slice;
 use std::str;
@@ -351,6 +357,24 @@ pub async fn memory_scan_handler(
             let mut global_scan_option = GLOBAL_SCAN_OPTION.write().unwrap();
             global_scan_option.insert(scan_request.scan_id.clone(), scan_request.clone());
         }
+        // memory-server-data-dir/Scan_xxx cleanup and create
+        let mut scan_folder_path = PathBuf::from("");
+        let mode =
+            std::env::var("MEMORY_SERVER_RUNNING_MODE").unwrap_or_else(|_| "unknown".to_string());
+        if mode == "embedded" {
+            let cache_directory = util::get_cache_directory(pid);
+            scan_folder_path = PathBuf::from(&cache_directory);
+        }
+        let sanitized_scan_id = scan_request.scan_id.trim().replace(" ", "_");
+        scan_folder_path.push("memory-server-data-dir");
+        scan_folder_path.push(&sanitized_scan_id);
+        let scan_folder = Path::new(&scan_folder_path);
+
+        if scan_folder.exists() {
+            fs::remove_dir_all(&scan_folder).expect("Failed to remove directory");
+        }
+        fs::create_dir_all(&scan_folder_path).expect("Failed to create directory");
+
         let is_number = match scan_request.data_type.as_str() {
             "int16" | "uint16" | "int32" | "uint32" | "float" | "int64" | "uint64" | "double" => {
                 true
@@ -359,10 +383,14 @@ pub async fn memory_scan_handler(
         };
         let found_count = Arc::new(AtomicUsize::new(0));
         let scan_align = scan_request.align;
+        let is_error_occurred = Arc::new(Mutex::new(false));
+        let error_message = Arc::new(Mutex::new(String::new()));
+
         let thread_results: Vec<Vec<(usize, String)>> = scan_request
             .address_ranges
             .par_iter()
-            .flat_map(|(start_address, end_address)| {
+            .enumerate()
+            .flat_map(|(index, &(ref start_address, ref end_address))| {
                 let found_count = Arc::clone(&found_count);
                 let size = end_address - start_address;
                 let chunk_size = 1024 * 1024 * 16; // 16MB
@@ -370,6 +398,12 @@ pub async fn memory_scan_handler(
 
                 (0..num_chunks)
                     .map(|i| {
+                        let mut error_occurred = is_error_occurred.lock().unwrap();
+                        let mut error_msg = error_message.lock().unwrap();
+
+                        if *error_occurred == true {
+                            return vec![];
+                        }
                         let chunk_start = start_address + i * chunk_size;
                         let chunk_end = std::cmp::min(chunk_start + chunk_size, *end_address);
                         let chunk_size_actual = chunk_end - chunk_start;
@@ -437,31 +471,83 @@ pub async fn memory_scan_handler(
                                     "int64" | "uint64" | "double" => 8,
                                     _ => 1,
                                 };
-                                let mut global_memory = GLOBAL_MEMORY.write().unwrap();
-                                let compressed_buffer =
-                                    lz4::block::compress(&buffer, None, false).unwrap();
 
-                                if let Some(memory) = global_memory.get_mut(&scan_request.scan_id) {
-                                    memory.push((
-                                        chunk_start,
-                                        compressed_buffer,
-                                        buffer.len(),
-                                        vec![],
-                                        0,
-                                        true,
-                                    ));
-                                } else {
-                                    global_memory.insert(
-                                        scan_request.scan_id.clone(),
-                                        vec![(
-                                            chunk_start,
-                                            compressed_buffer,
-                                            buffer.len(),
-                                            vec![],
-                                            0,
-                                            true,
-                                        )],
+                                let mut file_path = scan_folder_path.clone();
+                                file_path.push(format!("{}.dump", index));
+                                let file_exists = file_path.exists();
+
+                                let file = match OpenOptions::new()
+                                    .create(true)
+                                    .append(true)
+                                    .open(file_path)
+                                {
+                                    Ok(file) => file,
+                                    Err(e) => {
+                                        *error_occurred = true;
+                                        *error_msg = format!("Failed to open file: {}", e);
+                                        return vec![];
+                                    }
+                                };
+
+                                let mut writer = BufWriter::new(file);
+
+                                if !file_exists {
+                                    // status flag
+                                    let zero_bytes = [0x00, 0x00, 0x00, 0x00];
+                                    if let Err(e) = writer.write_all(&zero_bytes) {
+                                        *error_occurred = true;
+                                        *error_msg = format!("Failed to write 4 zero bytes: {}", e);
+                                        return vec![];
+                                    }
+                                }
+
+                                if let Err(e) = writer.write_all(&chunk_start.to_le_bytes()) {
+                                    *error_occurred = true;
+                                    *error_msg = format!("Failed to write chunk_start: {}", e);
+                                    return vec![];
+                                }
+
+                                let compressed_buffer =
+                                    match lz4::block::compress(&buffer, None, false) {
+                                        Ok(buf) => buf,
+                                        Err(e) => {
+                                            *error_occurred = true;
+                                            *error_msg =
+                                                format!("Failed to compress buffer: {}", e);
+                                            return vec![];
+                                        }
+                                    };
+
+                                if let Err(e) = writer
+                                    .write_all(&(compressed_buffer.len() as u64).to_le_bytes())
+                                {
+                                    *error_occurred = true;
+                                    *error_msg =
+                                        format!("Failed to write compressed buffer length: {}", e);
+                                    return vec![];
+                                }
+
+                                if let Err(e) =
+                                    writer.write_all(&(buffer.len() as u64).to_le_bytes())
+                                {
+                                    *error_occurred = true;
+                                    *error_msg = format!(
+                                        "Failed to write uncompressed buffer length: {}",
+                                        e
                                     );
+                                    return vec![];
+                                }
+
+                                if let Err(e) = writer.write_all(&compressed_buffer) {
+                                    *error_occurred = true;
+                                    *error_msg = format!("Failed to write buffer data: {}", e);
+                                    return vec![];
+                                }
+
+                                if let Err(e) = writer.flush() {
+                                    *error_occurred = true;
+                                    *error_msg = format!("Failed to flush buffer: {}", e);
+                                    return vec![];
                                 }
                                 found_count.fetch_add(buffer.len() / alignment, Ordering::SeqCst);
                             }
@@ -617,165 +703,274 @@ pub async fn memory_filter_handler(
             "int64" | "uint64" | "double" => 8,
             _ => 1,
         };
+        let is_error_occurred = Arc::new(Mutex::new(false));
+        let error_message = Arc::new(Mutex::new(String::new()));
+
+        let mut scan_folder_path = PathBuf::from("");
+        let mode =
+            std::env::var("MEMORY_SERVER_RUNNING_MODE").unwrap_or_else(|_| "unknown".to_string());
+        if mode == "embedded" {
+            let cache_directory = util::get_cache_directory(pid);
+            scan_folder_path = PathBuf::from(&cache_directory);
+        }
+        let sanitized_scan_id = filter_request.scan_id.trim().replace(" ", "_");
+        scan_folder_path.push("memory-server-data-dir");
+        scan_folder_path.push(&sanitized_scan_id);
+
         // unknown search
-        if let Some(memory) = global_memory.get_mut(&filter_request.scan_id) {
+        if scan_option.find_type == "unknown" {
             if do_suspend {
                 unsafe {
                     is_suspend_success = native_bridge::suspend_process(pid);
                 }
             }
+
+            let paths = match fs::read_dir(&scan_folder_path) {
+                Ok(entries) => entries
+                    .filter_map(|entry| entry.ok().map(|e| e.path()))
+                    .collect::<Vec<_>>(),
+                Err(e) => {
+                    let mut error_occurred = is_error_occurred.lock().unwrap();
+                    let mut error_msg = error_message.lock().unwrap();
+                    *error_occurred = true;
+                    *error_msg = format!("Failed to read directory: {}", e);
+                    vec![]
+                }
+            };
+
             let scan_align = scan_option.align;
-            memory.par_iter_mut().for_each(|entry| {
-                let (
-                    address,
-                    compressed_data,
-                    uncompressed_data_size,
-                    compressed_offsets,
-                    uncompressed_offsets_size,
-                    is_first,
-                ) = entry;
-                let mut local_positions = vec![];
-                let decompressed_data =
-                    lz4::block::decompress(compressed_data, Some(*uncompressed_data_size as i32))
-                        .unwrap();
-                let mut buffer: Vec<u8> = vec![0; (decompressed_data.len()) as usize];
-                let _nread = match native_bridge::read_process_memory(
-                    pid,
-                    *address as *mut libc::c_void,
-                    decompressed_data.len(),
-                    &mut buffer,
-                ) {
-                    Ok(nread) => nread,
-                    Err(_err) => -1,
-                };
 
-                if _nread == -1 {
-                    return;
-                }
-
-                if *is_first {
-                    for offset in (0..decompressed_data.len()).step_by(1) {
-                        if (*address + offset) % scan_align != 0 {
-                            continue;
+            if !*is_error_occurred.lock().unwrap() {
+                paths.par_iter().for_each(|file_path| {
+                    let mut error_occurred = is_error_occurred.lock().unwrap();
+                    let mut error_msg = error_message.lock().unwrap();
+                    if *error_occurred {
+                        return;
+                    }
+                    let mut serialized_data: Vec<u8> = Vec::new();
+                    if let Ok(file) = File::open(file_path) {
+                        let mut reader = BufReader::new(file);
+                        let mut data_buffer: Vec<u8> = Vec::new();
+                        if let Err(e) = reader.read_to_end(&mut data_buffer) {
+                            *error_occurred = true;
+                            *error_msg = format!("Failed to read file: {}", e);
+                            return;
                         }
-                        if offset + size > decompressed_data.len() {
-                            break;
-                        }
-                        let old_val = &decompressed_data[offset..offset + size];
-                        let new_val = &buffer[offset..offset + size];
-
-                        let pass_filter = match filter_request.data_type.as_str() {
-                            _ => compare_values!(
-                                new_val,
-                                old_val,
-                                filter_request.filter_method.as_str()
-                            ),
+                        let status_flag: [u8; 4] = match data_buffer[0..4].try_into() {
+                            Ok(flag) => flag,
+                            Err(e) => {
+                                *error_occurred = true;
+                                *error_msg = format!("Invalid address format: {}", e);
+                                return;
+                            }
                         };
-                        if pass_filter {
-                            local_positions.push(offset);
-                            found_count.fetch_add(1, Ordering::SeqCst);
+                        let mut offset = 4;
+                        let usize_size = size_of::<usize>();
+                        if status_flag == [0x00, 0x00, 0x00, 0x00] {
+                            while offset + 3 * usize_size <= data_buffer.len() {
+                                let address = usize::from_le_bytes(
+                                    data_buffer[offset..offset + usize_size]
+                                        .try_into()
+                                        .expect("Invalid address format"),
+                                );
+                                let address_offset = offset;
+                                offset += usize_size;
+
+                                let compressed_data_size = usize::from_le_bytes(
+                                    data_buffer[offset..offset + usize_size]
+                                        .try_into()
+                                        .expect("Invalid length format"),
+                                );
+                                offset += usize_size;
+
+                                let uncompressed_data_size = usize::from_le_bytes(
+                                    data_buffer[offset..offset + usize_size]
+                                        .try_into()
+                                        .expect("Invalid length format"),
+                                );
+                                offset += usize_size;
+
+                                if offset + compressed_data_size <= data_buffer.len() {
+                                    let compressed_data =
+                                        &data_buffer[offset..offset + compressed_data_size];
+                                    offset += compressed_data_size;
+                                    let decompressed_data = lz4::block::decompress(
+                                        compressed_data,
+                                        Some(uncompressed_data_size as i32),
+                                    )
+                                    .unwrap();
+                                    let mut buffer: Vec<u8> =
+                                        vec![0; (decompressed_data.len()) as usize];
+                                    let _nread = match native_bridge::read_process_memory(
+                                        pid,
+                                        address as *mut libc::c_void,
+                                        decompressed_data.len(),
+                                        &mut buffer,
+                                    ) {
+                                        Ok(nread) => nread,
+                                        Err(_err) => -1,
+                                    };
+
+                                    if _nread == -1 {
+                                        return;
+                                    }
+                                    for offset in (0..decompressed_data.len()).step_by(1) {
+                                        if (address + offset) % scan_align != 0 {
+                                            continue;
+                                        }
+                                        if offset + size > decompressed_data.len() {
+                                            break;
+                                        }
+                                        let old_val = &decompressed_data[offset..offset + size];
+                                        let new_val = &buffer[offset..offset + size];
+
+                                        let pass_filter = match filter_request.data_type.as_str() {
+                                            _ => compare_values!(
+                                                new_val,
+                                                old_val,
+                                                filter_request.filter_method.as_str()
+                                            ),
+                                        };
+                                        if pass_filter {
+                                            serialized_data.extend_from_slice(
+                                                &(address + offset).to_le_bytes(),
+                                            );
+                                            serialized_data.extend_from_slice(new_val);
+                                            found_count.fetch_add(1, Ordering::SeqCst);
+                                        }
+                                    }
+                                } else {
+                                    break;
+                                }
+                            }
+                        } else {
+                            while offset + usize_size + size <= data_buffer.len() {
+                                let address = match data_buffer.get(offset..offset + usize_size) {
+                                    Some(slice) => usize::from_le_bytes(
+                                        slice.try_into().expect("Invalid address format"),
+                                    ),
+                                    None => break,
+                                };
+                                offset += usize_size;
+
+                                let old_val = &data_buffer[offset..offset + size];
+                                offset += size;
+
+                                let mut new_val_vec: Vec<u8> = vec![0; size];
+                                let nread = match native_bridge::read_process_memory(
+                                    pid,
+                                    address as *mut libc::c_void,
+                                    size,
+                                    &mut new_val_vec,
+                                ) {
+                                    Ok(nread) => nread,
+                                    Err(_) => {
+                                        continue;
+                                    }
+                                };
+
+                                if nread != size as isize {
+                                    println!("Incomplete read at address {:x}", address);
+                                    continue;
+                                }
+                                let new_val: &[u8] = &new_val_vec;
+
+                                let pass_filter = match filter_request.data_type.as_str() {
+                                    _ => compare_values!(
+                                        new_val,
+                                        old_val,
+                                        filter_request.filter_method.as_str()
+                                    ),
+                                };
+
+                                if pass_filter {
+                                    serialized_data.extend_from_slice(&address.to_le_bytes());
+                                    serialized_data.extend_from_slice(&new_val);
+                                    found_count.fetch_add(1, Ordering::SeqCst);
+                                }
+                            }
                         }
                     }
-                    let offsets_as_bytes: Vec<u8> = local_positions
-                        .iter()
-                        .flat_map(|&x| x.to_le_bytes().to_vec())
-                        .collect();
-                    *compressed_offsets = compress(&offsets_as_bytes, None, false).unwrap();
-                    *uncompressed_offsets_size =
-                        local_positions.len() * std::mem::size_of::<usize>();
-                    *is_first = false;
-                    let compressed_buffer = lz4::block::compress(&buffer, None, false).unwrap();
-                    *compressed_data = compressed_buffer.clone();
-                    *uncompressed_data_size = buffer.len();
-                } else {
-                    let decompressed_offsets_buffer = lz4::block::decompress(
-                        compressed_offsets,
-                        Some(*uncompressed_offsets_size as i32),
-                    )
-                    .unwrap();
 
-                    let decompressed_offsets: Vec<usize> = decompressed_offsets_buffer
-                        .chunks_exact(8)
-                        .map(|chunk| usize::from_le_bytes(chunk.try_into().unwrap()))
-                        .collect();
-                    for offset in decompressed_offsets {
-                        if (*address + offset) % scan_align != 0 {
-                            continue;
+                    // rewrite file
+                    let mut file = match OpenOptions::new()
+                        .write(true)
+                        .truncate(true)
+                        .open(file_path)
+                    {
+                        Ok(file) => file,
+                        Err(e) => {
+                            *error_occurred = true;
+                            *error_msg = format!("Failed to open file for writing: {}", e);
+                            return;
                         }
-                        if offset + size > decompressed_data.len() {
-                            break;
-                        }
-                        let old_val = &decompressed_data[offset..offset + size];
-                        let new_val = &buffer[offset..offset + size];
+                    };
 
-                        let pass_filter = match filter_request.data_type.as_str() {
-                            _ => compare_values!(
-                                new_val,
-                                old_val,
-                                filter_request.filter_method.as_str()
-                            ),
-                        };
-                        if pass_filter {
-                            local_positions.push(offset);
-                            found_count.fetch_add(1, Ordering::SeqCst);
-                        }
+                    let number: u32 = 0x00000001;
+                    if let Err(e) = file.write_all(&number.to_le_bytes()) {
+                        *error_occurred = true;
+                        *error_msg = format!("Failed to write status flag: {}", e);
+                        return;
                     }
-                    let offsets_as_bytes: Vec<u8> = local_positions
-                        .iter()
-                        .flat_map(|&x| x.to_le_bytes().to_vec())
-                        .collect();
-                    *compressed_offsets = compress(&offsets_as_bytes, None, false).unwrap();
-                    *uncompressed_offsets_size =
-                        local_positions.len() * std::mem::size_of::<usize>();
-                    let compressed_buffer = lz4::block::compress(&buffer, None, false).unwrap();
-                    *compressed_data = compressed_buffer.clone();
-                    *uncompressed_data_size = buffer.len();
-                }
-            });
-            if found_count.load(Ordering::SeqCst) < 1_000_000 {
-                let mut results: Vec<_> = memory
-                    .par_iter()
-                    .flat_map(
-                        |(
-                            address,
-                            compressed_data,
-                            uncompressed_data_size,
-                            compressed_offsets,
-                            uncompressed_offsets_size,
-                            _,
-                        )| {
-                            let mut local_positions = vec![];
-                            if *uncompressed_offsets_size == 0 {
-                                return local_positions;
-                            }
 
-                            let decompressed_data = lz4::block::decompress(
-                                compressed_data,
-                                Some(*uncompressed_data_size as i32),
-                            )
-                            .unwrap();
-                            let decompressed_offsets_buffer = lz4::block::decompress(
-                                compressed_offsets,
-                                Some(*uncompressed_offsets_size as i32),
-                            )
-                            .unwrap();
-                            let decompressed_offsets: Vec<usize> = decompressed_offsets_buffer
-                                .chunks_exact(8)
-                                .map(|chunk| usize::from_le_bytes(chunk.try_into().unwrap()))
-                                .collect();
-                            for offset in decompressed_offsets {
-                                let val = &decompressed_data[offset..offset + size];
-                                local_positions.push((*address + offset, hex::encode(val)));
-                            }
-                            local_positions
-                        },
-                    )
-                    .collect();
-
-                results.sort_by_key(|k| k.0);
-                new_positions = results;
-                global_memory.remove(&filter_request.scan_id);
+                    if let Err(e) = file.write_all(&serialized_data) {
+                        *error_occurred = true;
+                        *error_msg = format!("Failed to write data: {}", e);
+                        return;
+                    }
+                });
             }
+
+            new_positions = if found_count.load(Ordering::SeqCst) < 1_000_000 {
+                let mut results: Vec<(usize, String)> = paths
+                    .par_iter()
+                    .flat_map(|file_path| {
+                        let mut file = match File::open(file_path) {
+                            Ok(file) => file,
+                            Err(e) => {
+                                eprintln!("Failed to open file {:?}: {}", file_path, e);
+                                return Vec::new();
+                            }
+                        };
+
+                        let mut flag = [0u8; 4];
+                        if let Err(e) = file.read_exact(&mut flag) {
+                            eprintln!("Failed to read flag from {:?}: {}", file_path, e);
+                            return Vec::new();
+                        }
+
+                        if u32::from_le_bytes(flag) != 0x00000001 {
+                            return Vec::new();
+                        }
+
+                        let mut data = Vec::new();
+                        if let Err(e) = file.read_to_end(&mut data) {
+                            eprintln!("Failed to read data from {:?}: {}", file_path, e);
+                            return Vec::new();
+                        }
+
+                        let mut local_results = Vec::new();
+                        let mut offset = 0;
+                        while offset + std::mem::size_of::<usize>() + size <= data.len() {
+                            let address = usize::from_le_bytes(
+                                data[offset..offset + std::mem::size_of::<usize>()]
+                                    .try_into()
+                                    .unwrap(),
+                            );
+                            offset += std::mem::size_of::<usize>();
+                            let value = hex::encode(&data[offset..offset + size]);
+                            offset += size;
+                            local_results.push((address, value));
+                        }
+
+                        local_results
+                    })
+                    .collect();
+                results
+            } else {
+                Vec::new()
+            };
+            new_positions.par_sort_unstable_by_key(|&(address, _)| address);
         } else if let Some(positions) = global_positions.get(&filter_request.scan_id) {
             if do_suspend {
                 unsafe {
@@ -1323,23 +1518,19 @@ pub async fn get_app_info_handler(
 ) -> Result<impl warp::Reply, warp::Rejection> {
     let pid = pid_state.lock().unwrap();
     if let Some(pid) = *pid {
-        let result = unsafe {
-            let raw_ptr = native_bridge::get_application_info(pid as c_int);
-            if raw_ptr.is_null() {
+        let result = native_bridge::get_application_info(pid);
+        let message = match result {
+            Ok(message) => message,
+            Err(e) => {
                 return Ok(warp::reply::with_status(
-                    warp::reply::json(&json!({"error": "Failed to get application info"})),
+                    warp::reply::json(&serde_json::json!({
+                        "message": e.to_string()
+                    })),
                     StatusCode::INTERNAL_SERVER_ERROR,
                 ));
             }
-
-            let c_str = CStr::from_ptr(raw_ptr);
-            let result_str = c_str.to_str().unwrap_or("Invalid UTF-8").to_owned();
-            libc::free(raw_ptr as *mut libc::c_void);
-
-            result_str
         };
-
-        let parsed_result: Value = match serde_json::from_str(&result) {
+        let parsed_result: Value = match serde_json::from_str(&message) {
             Ok(json) => json,
             Err(e) => {
                 return Ok(warp::reply::with_status(
@@ -1419,8 +1610,8 @@ pub async fn remove_watchpoint_handler(
 ) -> Result<impl warp::Reply, warp::Rejection> {
     let pid = pid_state.lock().unwrap();
 
-    if let Some(pid) = *pid {
-        let result = native_bridge::remove_watchpoint(pid, watchpoint.address);
+    if let Some(_pid) = *pid {
+        let result = native_bridge::remove_watchpoint(watchpoint.address);
 
         let ret = match result {
             Ok(_) => Ok(warp::reply::with_status(
@@ -1490,8 +1681,8 @@ pub async fn remove_breakpoint_handler(
     breakpoint: request::RemoveBreakPointRequest,
 ) -> Result<impl warp::Reply, warp::Rejection> {
     let pid = pid_state.lock().unwrap();
-    if let Some(pid) = *pid {
-        let result = native_bridge::remove_breakpoint(pid, breakpoint.address);
+    if let Some(_pid) = *pid {
+        let result = native_bridge::remove_breakpoint(breakpoint.address);
         let ret = match result {
             Ok(_) => Ok(warp::reply::with_status(
                 warp::reply::json(&request::RemoveBreakPointResponse {

@@ -1,36 +1,12 @@
-use byteorder::{ByteOrder, LittleEndian};
-use hex;
-use lazy_static::lazy_static;
-use libc::{self, c_char, c_int, c_void};
-use lz4;
-use lz4::block::compress;
-use memchr::memmem;
-use percent_encoding::percent_decode_str;
-use rayon::prelude::*;
-use regex::bytes::Regex;
+use crate::native_bridge;
+use capstone::prelude::*;
+use libc::{self};
+
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_json::Value;
-use std::collections::HashMap;
-
-use std::env;
-use std::ffi::CStr;
-use std::ffi::CString;
-
-use crate::native_bridge;
-use capstone::arch::arm64::ArchMode;
-use capstone::prelude::*;
-use capstone::Syntax;
-use log::{debug, error, info, trace, warn};
-use std::io::Error;
-use std::io::{BufRead, BufReader};
-use std::panic;
-use std::process;
 use std::slice;
 use std::str;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::RwLock;
-use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FileItem {
@@ -239,6 +215,19 @@ pub fn parse_directory_structure(raw_data: &str) -> Vec<FileItem> {
     }
 
     root_items
+}
+
+pub fn get_cache_directory(pid: i32) -> String {
+    let result = native_bridge::get_application_info(pid);
+    let parsed_result: Value = serde_json::from_str(&result.unwrap()).unwrap();
+    let target_os = env!("TARGET_OS");
+    if target_os == "ios" {
+        parsed_result["CachesDirectory"]
+            .to_string()
+            .replace("\"", "")
+    } else {
+        "".to_string()
+    }
 }
 
 pub fn disassemble(bytecode: *const u8, length: usize, address: u64) -> String {

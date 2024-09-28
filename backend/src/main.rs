@@ -8,6 +8,7 @@ mod allocator;
 mod api;
 mod logger;
 mod native_bridge;
+mod pointerscan;
 mod request;
 mod serve;
 mod util;

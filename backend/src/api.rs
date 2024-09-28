@@ -1,7 +1,10 @@
+use byteorder::WriteBytesExt;
 use byteorder::{ByteOrder, LittleEndian};
+use futures::executor::block_on;
 use hex;
 use lazy_static::lazy_static;
 use libc::{self, c_char, c_int, c_void};
+use log::{debug, error, info, trace, warn};
 use lz4;
 use lz4::block::compress;
 use memchr::memmem;
@@ -11,11 +14,8 @@ use regex::bytes::Regex;
 use serde::Serialize;
 use serde_json::json;
 use serde_json::Value;
-use std::collections::HashMap;
-use tide::http::cache;
-
-use log::{debug, error, info, trace, warn};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::env;
 use std::ffi::CStr;
@@ -33,10 +33,12 @@ use std::str;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::RwLock;
 use std::sync::{Arc, Mutex};
+use tide::http::cache;
 use warp::hyper::Body;
 use warp::{http::Response, http::StatusCode, Filter, Rejection, Reply};
 
 use crate::native_bridge;
+use crate::pointerscan;
 use crate::request;
 use crate::util;
 
@@ -1700,6 +1702,122 @@ pub async fn remove_breakpoint_handler(
             )),
         };
         return ret;
+    } else {
+        Ok(warp::reply::with_status(
+            warp::reply::json(&request::RemoveBreakPointResponse {
+                success: false,
+                message: format!("Pid not set"),
+            }),
+            StatusCode::BAD_REQUEST,
+        ))
+    }
+}
+
+pub async fn generate_pointer_map_handler(
+    pid_state: Arc<Mutex<Option<i32>>>,
+    pointermap_request: request::GeneratePointerMapRequest,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    let pid = pid_state.lock().unwrap();
+    let is_error_occurred = Arc::new(Mutex::new(false));
+    let error_message = Arc::new(Mutex::new(String::new()));
+
+    let mut is_suspend_success: bool = false;
+    let do_suspend = pointermap_request.do_suspend;
+    if let Some(pid) = *pid {
+        if do_suspend {
+            unsafe {
+                is_suspend_success = native_bridge::suspend_process(pid);
+            }
+        }
+        // memory-server-data-dir/PointerScan cleanup and create
+        let mut scan_folder_path = PathBuf::from("");
+        let mode =
+            std::env::var("MEMORY_SERVER_RUNNING_MODE").unwrap_or_else(|_| "unknown".to_string());
+        if mode == "embedded" {
+            let cache_directory = util::get_cache_directory(pid);
+            scan_folder_path = PathBuf::from(&cache_directory);
+        }
+
+        scan_folder_path.push("memory-server-data-dir");
+        scan_folder_path.push("PointerScan");
+        let scan_folder = Path::new(&scan_folder_path);
+
+        if scan_folder.exists() {
+            fs::remove_dir_all(&scan_folder).expect("Failed to remove directory");
+        }
+        fs::create_dir_all(&scan_folder_path).expect("Failed to create directory");
+        let mut buffer = vec![0u8; 1024 * 1024];
+
+        unsafe {
+            native_bridge::enumerate_regions_to_buffer(pid, buffer.as_mut_ptr(), buffer.len());
+        }
+        let buffer_cstring = unsafe { CString::from_vec_unchecked(buffer) };
+        let buffer_string = buffer_cstring.into_string().unwrap();
+        let buffer_reader = BufReader::new(buffer_string.as_bytes());
+
+        let mut address_ranges = Vec::new();
+
+        for line in buffer_reader.lines() {
+            if let Ok(line) = line {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+
+                if parts.len() >= 5 {
+                    let addresses: Vec<&str> = parts[0].split('-').collect();
+                    if addresses.len() == 2 {
+                        if parts[1].to_string().starts_with("rw") {
+                            let start_address = usize::from_str_radix(addresses[0], 16).unwrap();
+                            let end_address = usize::from_str_radix(addresses[1], 16).unwrap();
+                            address_ranges.push((start_address, end_address));
+                        }
+                    }
+                }
+            }
+        }
+
+        let modules = native_bridge::enum_modules(pid).unwrap();
+
+        // Construct MemoryRegion vector
+        let memory_regions: Vec<pointerscan::MemoryRegion> = address_ranges
+            .into_iter()
+            .map(|(start, end)| {
+                let module = modules.iter().find(|m| {
+                    let base = m["base"].as_u64().unwrap() as usize;
+                    let size = m["size"].as_u64().unwrap() as usize;
+                    start >= base && end <= base + size
+                });
+
+                pointerscan::MemoryRegion {
+                    base_address: start,
+                    size: end - start,
+                    module: module.map(|m| m["modulename"].as_str().unwrap().to_string()),
+                }
+            })
+            .collect();
+
+        let max_offset = pointermap_request.max_offset;
+        let max_depth = pointermap_request.max_depth;
+        let address_map = pointerscan::create_address_map(pid, &memory_regions);
+        let result = pointerscan::multi_level_pointer_scan(
+            pid,
+            &address_map,
+            vec![pointermap_request.target_address],
+            max_offset,
+            max_depth,
+        );
+        println!("{}", result.unwrap().len());
+
+        if do_suspend && is_suspend_success {
+            unsafe {
+                native_bridge::resume_process(pid);
+            }
+        }
+        Ok(warp::reply::with_status(
+            warp::reply::json(&request::GeneratePointerMapResponse {
+                success: true,
+                message: "Generate pointermap successfully".to_string(),
+            }),
+            StatusCode::OK,
+        ))
     } else {
         Ok(warp::reply::with_status(
             warp::reply::json(&request::RemoveBreakPointResponse {

@@ -101,3 +101,17 @@ pub struct RemoveBreakPointResponse {
     pub success: bool,
     pub message: String,
 }
+
+#[derive(Deserialize)]
+pub struct GeneratePointerMapRequest {
+    pub target_address: usize,
+    pub max_depth: usize,
+    pub max_offset: usize,
+    pub do_suspend: bool,
+}
+
+#[derive(Serialize)]
+pub struct GeneratePointerMapResponse {
+    pub success: bool,
+    pub message: String,
+}

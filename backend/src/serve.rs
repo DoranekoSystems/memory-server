@@ -152,6 +152,14 @@ pub async fn serve(mode: i32, host: IpAddr, port: u16) {
         .and(warp::get())
         .and_then(api::get_exception_info_handler);
 
+    let generate_pointer_map = warp::path!("pointermap")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(api::with_state(pid_state.clone()))
+        .and_then(|generate_pointermap_request, pid_state| async move {
+            api::generate_pointer_map_handler(pid_state, generate_pointermap_request).await
+        });
+
     let routes = open_process
         .or(read_memory)
         .or(read_memory_multiple)
@@ -171,6 +179,7 @@ pub async fn serve(mode: i32, host: IpAddr, port: u16) {
         .or(set_breakpoint)
         .or(remove_breakpoint)
         .or(get_exception_info)
+        .or(generate_pointer_map)
         .or(static_files)
         .with(cors)
         .with(warp::log::custom(logger::http_log));

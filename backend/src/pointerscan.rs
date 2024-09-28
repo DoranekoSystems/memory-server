@@ -1,10 +1,13 @@
+use crate::native_bridge;
+use async_std::task::current;
+use rayon::prelude::*;
 use rayon::prelude::*;
 use serde_json::Value;
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap,BTreeMap};
 use std::sync::{Arc, Mutex};
-
-use crate::native_bridge;
+use std::time::Instant;
+use rayon::iter::Either;
 
 const CHUNK_SIZE: usize = 1024 * 1024; // 1MB
 
@@ -32,24 +35,20 @@ pub struct PointerScanResult {
 
 pub fn multi_level_pointer_scan(
     pid: i32,
-    address_map: &HashMap<usize, Vec<usize>>,
+    address_map: &BTreeMap<usize, Vec<usize>>,
     initial_targets: Vec<usize>,
     max_offset: usize,
     max_depth: usize,
 ) -> Result<Vec<PointerScanResult>, String> {
     let modules = load_modules(pid)?;
-    let sorted_keys: Vec<usize> = {
-        let mut k = address_map.keys().cloned().collect::<Vec<_>>();
-        k.sort_unstable();
-        k
-    };
 
     let mut current_targets = initial_targets;
     let mut all_results = Vec::new();
 
     for depth in 0..max_depth {
+        println!("Depth:{} Start!",depth);
+        let start_time = Instant::now();
         let level_results = scan_level(
-            &sorted_keys,
             address_map,
             &current_targets,
             max_offset,
@@ -63,62 +62,50 @@ pub fn multi_level_pointer_scan(
         if depth == 0 {
             all_results = level_results.clone();
         } else {
-            update_results(&mut all_results, &level_results, depth);
         }
 
-        current_targets = level_results.iter().map(|r| r.address).collect();
-
+        current_targets = level_results
+            .iter()
+            .map(|r| r.address)
+            .collect::<Vec<usize>>();
         if current_targets.is_empty() {
             break;
         }
+        let elapsed = start_time.elapsed();
+        println!("ElapsedTime: {:?}", elapsed);
     }
 
-    Ok(filter_determined_pointers(all_results))
+    println!("{}", current_targets.len());
+    Ok(all_results)
 }
 
+
 fn scan_level(
-    sorted_keys: &[usize],
-    address_map: &HashMap<usize, Vec<usize>>,
+    address_map: &BTreeMap<usize, Vec<usize>>,
     targets: &[usize],
     max_offset: usize,
     modules: &[Module],
 ) -> Vec<PointerScanResult> {
     let mut results = Vec::new();
-    let mut sorted_targets = targets.to_vec();
-    sorted_targets.sort_unstable();
 
-    let mut key_index = 0;
-    let mut target_index = 0;
-
-    while key_index < sorted_keys.len() && target_index < sorted_targets.len() {
-        let key = sorted_keys[key_index];
-        let target = sorted_targets[target_index];
-
-        match (key as isize - target as isize).abs() as usize {
-            diff if diff <= max_offset => {
-                if let Some(addresses) = address_map.get(&key) {
-                    for &address in addresses {
-                        let offset = key as isize - target as isize;
-                        let module_name = find_module(address, modules).map(|m| m.name.clone());
-                        results.push(PointerScanResult {
-                            address,
-                            offset,
-                            module: module_name,
-                            next: None,
-                        });
-                    }
+    for &target in targets {
+        let lower_bound = target.saturating_sub(max_offset);
+        let upper_bound = target;
+    
+        for (&key, addresses) in address_map.range(lower_bound..=upper_bound) {
+            let offset = target as isize - key as isize;
+            if offset.abs() as usize <= max_offset {
+                for &address in addresses {
+                    results.push(PointerScanResult {
+                        address,
+                        offset,
+                        module: Some("".to_string()),
+                        next: None,
+                    });
                 }
-                key_index += 1;
-            }
-            diff if diff > max_offset && key > target => {
-                target_index += 1;
-            }
-            _ => {
-                key_index += 1;
             }
         }
     }
-
     results
 }
 
@@ -175,10 +162,7 @@ fn find_module(address: usize, modules: &[Module]) -> Option<&Module> {
 }
 
 fn filter_determined_pointers(results: Vec<PointerScanResult>) -> Vec<PointerScanResult> {
-    results
-        .into_iter()
-        .filter(|r| is_pointer_chain_valid(r))
-        .collect()
+    results.into_iter().collect()
 }
 
 fn is_pointer_chain_valid(result: &PointerScanResult) -> bool {
@@ -209,7 +193,8 @@ fn load_modules(pid: i32) -> Result<Vec<Module>, String> {
         .collect()
 }
 
-pub fn create_address_map(pid: i32, memory_regions: &[MemoryRegion]) -> HashMap<usize, Vec<usize>> {
+pub fn create_address_map(pid: i32, memory_regions: &[MemoryRegion]) -> BTreeMap<usize, Vec<usize>> {
+
     let min_address = memory_regions
         .iter()
         .map(|r| r.base_address)
@@ -233,7 +218,7 @@ pub fn create_address_map(pid: i32, memory_regions: &[MemoryRegion]) -> HashMap<
         })
         .collect();
 
-    let address_map = Arc::new(Mutex::new(HashMap::new()));
+    let address_map = Arc::new(Mutex::new(BTreeMap::new()));
 
     chunks.par_iter().for_each(|&(start, end)| {
         let local_map = scan_memory_chunk(pid, start, end, min_address, max_address);
@@ -255,8 +240,8 @@ fn scan_memory_chunk(
     end: usize,
     min_address: usize,
     max_address: usize,
-) -> HashMap<usize, Vec<usize>> {
-    let mut local_map = HashMap::new();
+) -> BTreeMap<usize, Vec<usize>> {
+    let mut local_map = BTreeMap::new();
     let chunk_size = end - start;
     let mut buffer = vec![0u8; chunk_size];
 
@@ -276,7 +261,7 @@ fn scan_memory_chunk(
                             .unwrap(),
                     );
 
-                    if value >= min_address && value < max_address {
+                    if value >= min_address && value < max_address && value % 4 == 0 {
                         local_map
                             .entry(value)
                             .or_insert_with(Vec::new)
@@ -289,4 +274,33 @@ fn scan_memory_chunk(
     }
 
     local_map
+}
+
+fn format_pointer_chain(result: &PointerScanResult) -> String {
+    let mut offsets = Vec::new();
+    let mut current = Some(result);
+    let mut base_address = result.address;
+
+    while let Some(pointer) = current {
+        if pointer.module.is_some() {
+            base_address = pointer.address;
+            offsets.clear();
+        } else {
+            offsets.push(pointer.offset);
+        }
+        current = pointer.next.as_ref().map(|boxed| boxed.as_ref());
+    }
+
+    let mut formatted = format!("0x{:X}", base_address);
+    for offset in offsets {
+        formatted.push_str(&format!(" {:X}", offset));
+    }
+    formatted
+}
+
+pub fn print_formatted_results(results: &mut [PointerScanResult]) {
+    results.sort_by_key(|result| result.address);
+    for result in results {
+        println!("{}", format_pointer_chain(result));
+    }
 }

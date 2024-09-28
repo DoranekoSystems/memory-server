@@ -163,7 +163,7 @@ const void *read_file(const char *path, size_t *size, char **error_message)
     return data;
 }
 
-const char *get_application_info(DWORD pid)
+const char *get_application_info_native(DWORD pid)
 {
     HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
     if (hProcess == NULL)

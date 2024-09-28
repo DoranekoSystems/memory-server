@@ -1,6 +1,5 @@
 use byteorder::WriteBytesExt;
 use byteorder::{ByteOrder, LittleEndian};
-use futures::executor::block_on;
 use hex;
 use lazy_static::lazy_static;
 use libc::{self, c_char, c_int, c_void};
@@ -1804,8 +1803,7 @@ pub async fn generate_pointer_map_handler(
             max_offset,
             max_depth,
         );
-        println!("{}", result.unwrap().len());
-
+        //pointerscan::print_formatted_results(&mut result.unwrap());
         if do_suspend && is_suspend_success {
             unsafe {
                 native_bridge::resume_process(pid);

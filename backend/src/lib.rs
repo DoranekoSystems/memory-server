@@ -18,14 +18,13 @@ fn main() {
         runtime.block_on(async {
             std::env::set_var("MEMORY_SERVER_RUNNING_MODE", "embedded");
 
-            env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
-
             let host: IpAddr = "0.0.0.0".parse().unwrap();
             let port: u16 = 3030;
             println!(
-                "memory_gadget has started listening on host {} and port {}.",
+                "memory_spy has started listening on host {} and port {}.",
                 host, port
             );
+            logger::init_log();
             serve::serve(1, host, port).await;
         });
     });

@@ -1,34 +1,7 @@
-use byteorder::{ByteOrder, LittleEndian};
-use hex;
-use lazy_static::lazy_static;
 use libc::{self, c_char, c_int, c_void};
-use lz4;
-use lz4::block::compress;
-use memchr::memmem;
-use percent_encoding::percent_decode_str;
-use rayon::prelude::*;
-use regex::bytes::Regex;
-use serde::{Deserialize, Serialize};
 use serde_json::json;
-use serde_json::Value;
-use std::collections::HashMap;
-
-use std::env;
 use std::ffi::CStr;
-use std::ffi::CString;
-
-use log::{debug, error, info, trace, warn};
 use std::io::Error;
-use std::io::{BufRead, BufReader};
-use std::panic;
-use std::process;
-use std::slice;
-use std::str;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::RwLock;
-use std::sync::{Arc, Mutex};
-
-use crate::api;
 
 #[cfg_attr(target_os = "android", link(name = "c++_static", kind = "static"))]
 #[cfg_attr(target_os = "android", link(name = "c++abi", kind = "static"))]
@@ -59,7 +32,7 @@ extern "C" {
         size: *mut usize,
         error_message: *mut *mut c_char,
     ) -> *const c_void;
-    pub fn get_application_info(pid: c_int) -> *const c_char;
+    pub fn get_application_info_native(pid: c_int) -> *const c_char;
     pub fn debugger_new(pid: c_int) -> bool;
     pub fn set_watchpoint_native(
         address: libc::uintptr_t,
@@ -132,7 +105,7 @@ pub fn set_watchpoint(pid: i32, address: usize, size: usize, type_: i32) -> Resu
     }
 }
 
-pub fn remove_watchpoint(pid: i32, address: usize) -> Result<i32, Error> {
+pub fn remove_watchpoint(address: usize) -> Result<i32, Error> {
     let result = unsafe { remove_watchpoint_native(address) };
     if result == 0 {
         Ok(result as i32)
@@ -157,7 +130,7 @@ pub fn set_breakpoint(pid: i32, address: usize, hit_count: i32) -> Result<i32, E
     }
 }
 
-pub fn remove_breakpoint(pid: i32, address: usize) -> Result<i32, Error> {
+pub fn remove_breakpoint(address: usize) -> Result<i32, Error> {
     let result = unsafe { remove_breakpoint_native(address) };
     if result == 0 {
         Ok(result)
@@ -204,4 +177,24 @@ pub fn enum_modules(pid: i32) -> Result<Vec<serde_json::Value>, String> {
     unsafe { libc::free(module_info_ptr as *mut libc::c_void) };
 
     Ok(modules)
+}
+
+pub fn get_application_info(pid: i32) -> Result<String, Error> {
+    let result = unsafe {
+        let raw_ptr = get_application_info_native(pid as c_int);
+        if raw_ptr.is_null() {
+            return Err(Error::new(
+                std::io::ErrorKind::Other,
+                "Failed to get application info",
+            ));
+        }
+
+        let c_str = CStr::from_ptr(raw_ptr);
+        let result_str = c_str.to_str().unwrap_or("Invalid UTF-8").to_owned();
+        libc::free(raw_ptr as *mut libc::c_void);
+
+        result_str
+    };
+
+    Ok(result)
 }

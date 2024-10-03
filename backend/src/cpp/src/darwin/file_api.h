@@ -30,6 +30,6 @@
 // C API Exports
 extern "C" const char *explore_directory(const char *path, int maxDepth);
 extern "C" const void *read_file(const char *path, size_t *size, char **error_message);
-extern "C" const char *get_application_info(pid_t pid);
+extern "C" const char *get_application_info_native(pid_t pid);
 
 #endif

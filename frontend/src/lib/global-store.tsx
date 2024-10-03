@@ -5,6 +5,14 @@ type RegisterInfo = {
   [key: string]: number;
 };
 
+type Bookmark = {
+  address: number;
+  type: string;
+  query: string;
+  value: string;
+  isFrowzen: boolean;
+};
+
 type Watchpoint = {
   address: number;
   size: number;
@@ -46,6 +54,14 @@ type BreakpointStore = {
   removeBreakpoint: (address: number) => void;
   updateBreakpointHitCount: (address: number, hitCount: number) => void;
 };
+
+interface BookmarkStore {
+  bookmarkLists: Bookmark[];
+  addBookmark: (bookmark: Bookmark) => void;
+  removeBookmark: (index: number) => void;
+  updateBookmark: (index: number, updatedBookmark: Partial<Bookmark>) => void;
+  toggleFreeze: (index: number) => void;
+}
 
 interface GlobalState {
   ipAddress: string;
@@ -157,6 +173,30 @@ export const useBreakpointStore = create<BreakpointStore>((set) => ({
     set((state) => ({
       breakpoints: state.breakpoints.map((bp) =>
         bp.address === address ? { ...bp, hitCount } : bp
+      ),
+    })),
+}));
+
+export const useBookmarkStore = create<BookmarkStore>((set) => ({
+  bookmarkLists: [],
+  addBookmark: (bookmark) =>
+    set((state) => ({
+      bookmarkLists: [...state.bookmarkLists, bookmark],
+    })),
+  removeBookmark: (index) =>
+    set((state) => ({
+      bookmarkLists: state.bookmarkLists.filter((_, i) => i !== index),
+    })),
+  updateBookmark: (index, updatedBookmark) =>
+    set((state) => ({
+      bookmarkLists: state.bookmarkLists.map((bookmark, i) =>
+        i === index ? { ...bookmark, ...updatedBookmark } : bookmark
+      ),
+    })),
+  toggleFreeze: (index) =>
+    set((state) => ({
+      bookmarkLists: state.bookmarkLists.map((bookmark, i) =>
+        i === index ? { ...bookmark, isFrozen: !bookmark.isFrozen } : bookmark
       ),
     })),
 }));

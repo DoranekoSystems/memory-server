@@ -1,36 +1,13 @@
-use byteorder::{ByteOrder, LittleEndian};
-use hex;
-use lazy_static::lazy_static;
-use libc::{self, c_char, c_int, c_void};
-use lz4;
-use lz4::block::compress;
-use memchr::memmem;
-use percent_encoding::percent_decode_str;
-use rayon::prelude::*;
-use regex::bytes::Regex;
-use serde::{Deserialize, Serialize};
-use serde_json::json;
-use serde_json::Value;
-use std::collections::HashMap;
-
-use std::env;
-use std::ffi::CStr;
-use std::ffi::CString;
-
 use crate::native_bridge;
-use capstone::arch::arm64::ArchMode;
 use capstone::prelude::*;
-use capstone::Syntax;
-use log::{debug, error, info, trace, warn};
-use std::io::Error;
-use std::io::{BufRead, BufReader};
-use std::panic;
-use std::process;
+use libc::{self};
+use regex::Regex;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::num::ParseIntError;
+use std::path::Path;
 use std::slice;
 use std::str;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::RwLock;
-use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FileItem {
@@ -68,7 +45,7 @@ pub fn _read_memory_32(pid: i32, address: u32) -> Result<u32, String> {
 }
 
 pub fn _evaluate_expression(expr: &str) -> Result<isize, String> {
-    let re = regex::Regex::new(r"(\d+)\s*([+\-*/])\s*(\d+)").unwrap();
+    let re = Regex::new(r"(\d+)\s*([+\-*/])\s*(\d+)").unwrap();
     if let Some(caps) = re.captures(expr) {
         let a: isize = caps[1]
             .parse()
@@ -91,21 +68,20 @@ pub fn _evaluate_expression(expr: &str) -> Result<isize, String> {
 pub fn resolve_nested_address(
     pid: i32,
     nested_addr: &str,
-    modules: &Vec<serde_json::Value>,
+    modules: &[serde_json::Value],
 ) -> Result<u64, String> {
-    let re =
-        regex::Regex::new(r"(\[)|(\])|([^\[\]]+)").map_err(|e| format!("Regex error: {}", e))?;
+    let re = Regex::new(r"(\[)|(\])|([^\[\]]+)").map_err(|e| format!("Regex error: {}", e))?;
     let mut stack = Vec::new();
     let mut current_expr = String::new();
 
     for cap in re.captures_iter(nested_addr) {
-        if let Some(_) = cap.get(1) {
+        if cap.get(1).is_some() {
             if !current_expr.is_empty() {
                 stack.push(current_expr);
                 current_expr = String::new();
             }
             current_expr.push('[');
-        } else if let Some(_) = cap.get(2) {
+        } else if cap.get(2).is_some() {
             if !current_expr.is_empty() {
                 let inner_value = resolve_single_level_address(&current_expr, modules)?;
                 let memory_value = read_memory_64(pid, inner_value)?;
@@ -127,53 +103,91 @@ pub fn resolve_nested_address(
 
 pub fn resolve_single_level_address(
     addr: &str,
-    modules: &Vec<serde_json::Value>,
+    modules: &[serde_json::Value],
 ) -> Result<u64, String> {
-    let re = regex::Regex::new(r"([-+])?(?:\s*)((?:\w|-)+(?:\.\w+)*|\d+|0x[\da-fA-F]+)")
+    let resolved_addr = preemptive_module_resolution(addr, modules)?;
+
+    let re = Regex::new(r"(?:([+\-*])?\s*)(0x[\da-fA-F]+|\d+)")
         .map_err(|e| format!("Regex error: {}", e))?;
+
     let mut current_address: u64 = 0;
     let mut first_item = true;
 
-    for cap in re.captures_iter(addr) {
-        let op = cap.get(1).map_or("+", |m| m.as_str());
-        let part = cap.get(2).unwrap().as_str();
-
-        let value = if let Some(module_info) = modules.iter().find(|m| {
-            m["modulename"]
-                .as_str()
-                .map_or(false, |name| part.eq_ignore_ascii_case(name))
-        }) {
-            let base = module_info["base"].as_u64().ok_or("Invalid base address")?;
-            base
-        } else {
-            u64::from_str_radix(part.trim_start_matches("0x"), 16)
-                .map_err(|_| format!("Invalid number: {}", part))?
-        };
+    for cap in re.captures_iter(&resolved_addr) {
+        let op = cap.get(1).map(|m| m.as_str());
+        let value_str = cap.get(2).unwrap().as_str();
+        let value = parse_number(value_str)?;
 
         if first_item {
             current_address = value;
             first_item = false;
-        } else {
-            match op {
+        } else if let Some(operator) = op {
+            match operator {
                 "+" => current_address = current_address.wrapping_add(value),
                 "-" => current_address = current_address.wrapping_sub(value),
-                _ => return Err(format!("Invalid operation: {}", op)),
+                "*" => current_address = current_address.wrapping_mul(value),
+                _ => return Err(format!("Invalid operation: {}", operator)),
             }
+        } else {
+            return Err("Expected operator, but none found".to_string());
         }
+    }
+
+    if first_item {
+        current_address = parse_number(&resolved_addr)?;
     }
 
     Ok(current_address)
 }
 
+fn preemptive_module_resolution(
+    addr: &str,
+    modules: &[serde_json::Value],
+) -> Result<String, String> {
+    let mut resolved = String::from(addr);
+    for module in modules {
+        if let (Some(name), Some(base)) = (module["modulename"].as_str(), module["base"].as_u64()) {
+            let path = Path::new(name);
+            if let Some(file_name) = path.file_name() {
+                let file_name_str = file_name.to_string_lossy();
+                let escaped_name = regex::escape(&file_name_str);
+                let re = Regex::new(&format!(r"\b{}\b", escaped_name))
+                    .map_err(|e| format!("Regex error: {}", e))?;
+
+                resolved = re
+                    .replace_all(&resolved, |caps: &regex::Captures| {
+                        let matched = caps.get(0).unwrap().as_str();
+                        if resolved[caps.get(0).unwrap().end()..].starts_with('.') {
+                            matched.to_string()
+                        } else {
+                            format!("0x{:X}", base)
+                        }
+                    })
+                    .to_string();
+            }
+        }
+    }
+    Ok(resolved)
+}
+
+fn parse_number(s: &str) -> Result<u64, String> {
+    let s = s.trim();
+    if s.starts_with("0x") {
+        u64::from_str_radix(&s[2..], 16)
+    } else {
+        s.parse::<u64>()
+    }
+    .map_err(|e: ParseIntError| format!("Invalid number '{}': {}", s, e))
+}
+
 pub fn resolve_symbolic_address(
     pid: i32,
     symbolic_addr: &str,
-    modules: &Vec<serde_json::Value>,
+    modules: &[serde_json::Value],
 ) -> Result<usize, String> {
     let resolved = resolve_nested_address(pid, symbolic_addr, modules)?;
     Ok(resolved as usize)
 }
-
 pub fn parse_directory_structure(raw_data: &str) -> Vec<FileItem> {
     let mut root_items = Vec::new();
     let mut stack: Vec<*mut FileItem> = Vec::new();
@@ -239,6 +253,19 @@ pub fn parse_directory_structure(raw_data: &str) -> Vec<FileItem> {
     }
 
     root_items
+}
+
+pub fn get_cache_directory(pid: i32) -> String {
+    let result = native_bridge::get_application_info(pid);
+    let parsed_result: Value = serde_json::from_str(&result.unwrap()).unwrap();
+    let target_os = env!("TARGET_OS");
+    if target_os == "ios" {
+        parsed_result["CachesDirectory"]
+            .to_string()
+            .replace("\"", "")
+    } else {
+        "".to_string()
+    }
 }
 
 pub fn disassemble(bytecode: *const u8, length: usize, address: u64) -> String {

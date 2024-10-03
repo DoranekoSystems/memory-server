@@ -127,6 +127,7 @@ ssize_t write_memory_native(int pid, void *address, size_t size, unsigned char *
         {
             if (size - i < sizeof(long))
             {
+                errno = 0;
                 long orig =
                     ptrace(PTRACE_PEEKDATA, pid, reinterpret_cast<char *>(address) + i, NULL);
                 if (errno != 0)

@@ -311,7 +311,7 @@ const void *read_file(const char *path, size_t *size, char **error_message)
     }
 }
 
-const char *get_application_info(pid_t pid)
+const char *get_application_info_native(pid_t pid)
 {
     @autoreleasepool
     {

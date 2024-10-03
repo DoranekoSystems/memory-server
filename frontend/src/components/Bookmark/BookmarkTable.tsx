@@ -48,6 +48,7 @@ import {
   arrayBufferToLittleEndianHexString,
   convertFromLittleEndianHex,
 } from "@/lib/converter";
+import { useBookmarkStore } from "../../lib/global-store";
 import { isHexadecimal } from "@/lib/utils";
 import { useStore, useWatchpointStore } from "@/lib/global-store";
 import { v4 as uuidv4 } from "uuid";
@@ -98,13 +99,16 @@ const StyledTableRow = styled(TableRow)(({ theme }) => ({
   },
 }));
 
-const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
+const BookmarkTable = ({ isVisible }) => {
   const memoryApi = useStore((state) => state.memoryApi);
   const targetOS = useStore((state) => state.targetOS);
   const serverMode = useStore((state) => state.serverMode);
+  const { bookmarkLists, addBookmark, updateBookmark, removeBookmark } =
+    useBookmarkStore();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const ipAddress = useStore((state) => state.ipAddress);
+  const toggleFreeze = useBookmarkStore((state) => state.toggleFreeze);
   const [refreshing, setRefreshing] = useState(false);
   const [frozenValues, setFrozenValues] = useState({});
   const [frozenRows, setFrozenRows] = useState({});
@@ -115,22 +119,24 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
   const [open, setOpen] = useState(false);
   const [selectedSize, setSelectedSize] = useState("1");
   const [selectedType, setSelectedType] = useState("r");
+
   const isRowFrozen = useCallback(
-    (index) => frozenRows[index] || false,
-    [frozenRows]
+    (index) => bookmarkLists[index].isFrowzen,
+    [bookmarkLists]
   );
 
-  const handleFreezeToggle = useCallback((index) => {
-    setFrozenRows((prev) => ({
-      ...prev,
-      [index]: !prev[index],
-    }));
-  }, []);
+  const handleFreezeToggle = useCallback(
+    (index: number) => {
+      toggleFreeze(index);
+    },
+    [bookmarkLists]
+  );
 
   const updateDisplayedRows = useCallback(async () => {
     if (!isVisible) return;
-    const updatedBookmarks = await Promise.all(
-      bookMarkLists.map(async (bookmark, index) => {
+    const length = bookmarkLists.length;
+    await Promise.all(
+      bookmarkLists.map(async (bookmark, index) => {
         try {
           let resolveAddr = bookmark.address;
           if (!isHexadecimal(bookmark.query)) {
@@ -155,7 +161,13 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
               ? bookmark.value
               : updatedValue;
 
-            return { ...bookmark, address: resolveAddr, value: finalValue };
+            if (bookmarkLists.length == length) {
+              updateBookmark(index, {
+                ...bookmark,
+                address: resolveAddr,
+                value: finalValue,
+              });
+            }
           }
         } catch (error) {
           console.error("Error updating memory value:", error);
@@ -163,19 +175,11 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
         }
       })
     );
-    setBookmarkLists(updatedBookmarks);
     setRefreshing(false);
-  }, [
-    bookMarkLists,
-    ipAddress,
-    setBookmarkLists,
-    frozenValues,
-    isRowFrozen,
-    isVisible,
-  ]);
+  }, [bookmarkLists, ipAddress, frozenValues, isRowFrozen, isVisible]);
 
   const freezeMemory = useCallback(async () => {
-    for (const [index, bookmark] of bookMarkLists.entries()) {
+    for (const [index, bookmark] of bookmarkLists.entries()) {
       if (isRowFrozen(index)) {
         try {
           const buffer = new ArrayBuffer(
@@ -253,7 +257,7 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
         }
       }
     }
-  }, [bookMarkLists, ipAddress, isRowFrozen]);
+  }, [bookmarkLists, ipAddress, isRowFrozen]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -270,24 +274,19 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
 
   const handleDelete = useCallback(
     (index) => {
-      setBookmarkLists((prevLists) => prevLists.filter((_, i) => i !== index));
-      setFrozenRows((prev) => {
-        const newFrozenRows = { ...prev };
-        delete newFrozenRows[index];
-        return newFrozenRows;
-      });
+      removeBookmark(index);
     },
-    [setBookmarkLists]
+    [bookmarkLists]
   );
 
   const handleEdit = (event, index) => {
     event.stopPropagation();
     setEditingIndex(index);
-    setEditedType(bookMarkLists[index].type);
+    setEditedType(bookmarkLists[index].type);
     setEditedValue(
       convertFromLittleEndianHex(
-        bookMarkLists[index].value,
-        bookMarkLists[index].type
+        bookmarkLists[index].value,
+        bookmarkLists[index].type
       )
     );
     setEditedBase({ ...editedBase, [index]: "dec" });
@@ -299,7 +298,7 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
   };
 
   const handleSetWatchPoint = async (event, index) => {
-    const address = bookMarkLists[index].address;
+    const address = bookmarkLists[index].address;
     const result = await memoryApi.setWatchPoint(
       address,
       parseInt(selectedSize),
@@ -319,7 +318,7 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
 
   const handleSave = async (event, index) => {
     event.stopPropagation();
-    const updatedBookmark = { ...bookMarkLists[index] };
+    const updatedBookmark = { ...bookmarkLists[index] };
     updatedBookmark.type = editedType;
 
     let valueToConvert = editedValue;
@@ -389,9 +388,7 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
         console.log(ret.message);
       }
 
-      setBookmarkLists((prevLists) =>
-        prevLists.map((item, i) => (i === index ? updatedBookmark : item))
-      );
+      updateBookmark(index, updatedBookmark);
       setEditingIndex(null);
     } catch (error) {
       console.error("Error updating memory:", error);
@@ -460,7 +457,7 @@ const BookmarkTable = ({ bookMarkLists, setBookmarkLists, isVisible }) => {
               </TableRow>
             </TableHead>
             <TableBody>
-              {bookMarkLists.map((row, index) => (
+              {bookmarkLists.map((row, index) => (
                 <StyledTableRow
                   key={row.address}
                   selected={isRowFrozen(index)}

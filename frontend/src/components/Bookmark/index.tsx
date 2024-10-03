@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { useStore } from "../../lib/global-store";
+import { useStore, useBookmarkStore } from "../../lib/global-store";
 import {
   Card,
   CardContent,
@@ -33,7 +33,7 @@ export function Bookmark({ currentPage }) {
   const [addressRanges, setAddressRanges] = useState<[bigint, bigint][]>([
     [BigInt(0), BigInt("0x7FFFFFFFFFFFFF")],
   ]);
-  const [bookmarkLists, setBookmarkLists] = useState<any[]>([]);
+  const { bookmarkLists, addBookmark } = useBookmarkStore();
   const [dataType, setDataType] = useState("int32");
   const ipAddress = useStore((state) => state.ipAddress);
   const serverMode = useStore((state) => state.serverMode);
@@ -115,7 +115,6 @@ export function Bookmark({ currentPage }) {
   };
 
   const handleInit = async () => {
-    setBookmarkLists([]);
     setSelectedIndices([]);
     setSelectedAddresses([]);
   };
@@ -137,19 +136,16 @@ export function Bookmark({ currentPage }) {
     if (!isHexadecimal(resolveAddr)) {
       let ret = await memoryApi.resolveAddress(resolveAddr);
       if (ret.success) {
-        resolveAddr = ret.data.address.toString(16);
+        resolveAddr = "0x" + ret.data.address.toString(16);
       } else {
         return;
       }
     }
-    setBookmarkLists([
-      ...bookmarkLists,
-      {
-        address: parseInt(resolveAddr, 16),
-        type: newDataType,
-        query: newAddress,
-      },
-    ]);
+    addBookmark({
+      address: parseInt(resolveAddr, 16),
+      type: newDataType,
+      query: newAddress,
+    });
     setNewAddress("");
     setNewDataType("int32");
     setShowAddAddressForm(false);
@@ -181,6 +177,7 @@ export function Bookmark({ currentPage }) {
                 <Input
                   id="address"
                   value={newAddress}
+                  placeholder="eg:0x400000,[libX.dylib + 0x300]"
                   onChange={handleAddressChange}
                   className="mb-2"
                 />
@@ -224,7 +221,6 @@ export function Bookmark({ currentPage }) {
             <BookmarkTable
               ref={tableRef}
               bookMarkLists={bookmarkLists}
-              setBookmarkLists={setBookmarkLists}
               selectedIndices={selectedIndices}
               handleSelect={handleSelect}
               convertFromLittleEndianHex={convertFromLittleEndianHex}

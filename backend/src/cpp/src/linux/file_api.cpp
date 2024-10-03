@@ -104,7 +104,7 @@ const void *read_file(const char *path, size_t *size, char **error_message)
     return buffer;
 }
 
-const char *get_application_info(pid_t pid)
+const char *get_application_info_native(pid_t pid)
 {
     char exe_path[64];
     snprintf(exe_path, sizeof(exe_path), "/proc/%d/exe", pid);

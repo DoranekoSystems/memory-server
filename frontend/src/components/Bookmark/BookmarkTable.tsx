@@ -121,7 +121,7 @@ const BookmarkTable = ({ isVisible }) => {
   const [selectedType, setSelectedType] = useState("r");
 
   const isRowFrozen = useCallback(
-    (index) => bookmarkLists[index].isFrowzen,
+    (index) => bookmarkLists[index].isFrozen,
     [bookmarkLists]
   );
 

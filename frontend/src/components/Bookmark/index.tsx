@@ -170,7 +170,7 @@ export function Bookmark({ currentPage }) {
               Add
             </Button>
           </CardHeader>
-          <CardContent className="overflow-y-auto max-h-[500px]">
+          <CardContent className="overflow-y-auto max-h-[1200px]">
             {showAddAddressForm && (
               <div className="mb-6">
                 <Label htmlFor="address">Address</Label>

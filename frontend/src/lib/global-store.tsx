@@ -10,7 +10,7 @@ type Bookmark = {
   type: string;
   query: string;
   value: string;
-  isFrowzen: boolean;
+  isFrozen: boolean;
 };
 
 type Watchpoint = {

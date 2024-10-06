@@ -84,10 +84,12 @@ const StyledTableCell = styled(TableCell)(({ theme }) => ({
   },
   [`&.${tableCellClasses.body}`]: {
     fontSize: 14,
+    padding: "6px 16px",
   },
 }));
 
 const StyledTableRow = styled(TableRow)(({ theme }) => ({
+  height: "26px",
   "&:nth-of-type(odd)": {
     backgroundColor: theme.palette.action.hover,
   },
@@ -121,7 +123,7 @@ const BookmarkTable = ({ isVisible }) => {
   const [selectedType, setSelectedType] = useState("r");
 
   const isRowFrozen = useCallback(
-    (index) => bookmarkLists[index].isFrowzen,
+    (index) => bookmarkLists[index].isFrozen,
     [bookmarkLists]
   );
 
@@ -276,7 +278,7 @@ const BookmarkTable = ({ isVisible }) => {
     (index) => {
       removeBookmark(index);
     },
-    [bookmarkLists]
+    [removeBookmark]
   );
 
   const handleEdit = (event, index) => {
@@ -459,7 +461,7 @@ const BookmarkTable = ({ isVisible }) => {
             <TableBody>
               {bookmarkLists.map((row, index) => (
                 <StyledTableRow
-                  key={row.address}
+                  key={row.address + "-" + index}
                   selected={isRowFrozen(index)}
                   hover
                 >

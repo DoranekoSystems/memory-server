@@ -27,8 +27,15 @@ import {
 } from "@/lib/converter";
 
 import { getMemoryRegions } from "@/lib/utils";
+import { IconButton, Tooltip } from "@mui/material";
+import BookmarkBorderIcon from "@mui/icons-material/BookmarkBorder";
+import ClearIcon from "@mui/icons-material/Clear";
+import { useBookmarkStore } from "../../lib/global-store";
+
 export function Scanner({ currentPage }) {
   const memoryApi = useStore((state) => state.memoryApi);
+  const { bookmarkLists, addBookmark, updateBookmark, removeBookmark } =
+    useBookmarkStore();
   const [tabs, setTabs] = useState([{ id: "Scan 1", label: "Scan 1" }]);
   const [activeTab, setActiveTab] = useState("Scan 1");
   const [tabStates, setTabStates] = useState({
@@ -286,6 +293,19 @@ export function Scanner({ currentPage }) {
         selectedAddresses: newSelectedAddresses,
       };
     });
+  };
+
+  const handleAddBoookmark = (e) => {
+    const currentState = getCurrentTabState();
+    for (const address of currentState.selectedAddresses) {
+      addBookmark({
+        address: address,
+        value: "",
+        type: currentState.dataType,
+        query: address,
+        isFrozen: false,
+      });
+    }
   };
 
   const handlePatchValue = (e) => {
@@ -612,6 +632,18 @@ export function Scanner({ currentPage }) {
               convertFromLittleEndianHex={convertFromLittleEndianHex}
               currentPage={currentPage}
             />
+            <div className="mt-2">
+              <Tooltip title="Bookmark">
+                <IconButton onClick={handleAddBoookmark}>
+                  <BookmarkBorderIcon sx={{ mr: 1, cursor: "pointer" }} />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Deselect">
+                <IconButton onClick={handleDeselect}>
+                  <ClearIcon />
+                </IconButton>
+              </Tooltip>
+            </div>
           </CardContent>
         </Card>
         <Card className="w-full max-w-4xl">
@@ -631,7 +663,6 @@ export function Scanner({ currentPage }) {
                 onChange={handlePatchValue}
               />
               <Button onClick={handlePatch}>Patch</Button>
-              <Button onClick={handleDeselect}>Deselect</Button>
             </div>
           </CardContent>
         </Card>

@@ -196,9 +196,9 @@ export class MemoryApi {
         params: { path: fullPath },
         responseType: "blob",
       });
-      this.handleResponse(response);
+      return this.handleResponse(response);
     } catch (error) {
-      this.handleError(error);
+      return this.handleError(error);
     }
   }
 

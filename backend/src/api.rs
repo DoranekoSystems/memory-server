@@ -3,7 +3,7 @@ use hex;
 use lazy_static::lazy_static;
 use libc::{self, c_char, c_int, c_void};
 use lz4;
-use lz4::block::compress;
+
 use memchr::memmem;
 use percent_encoding::percent_decode_str;
 use rayon::prelude::*;
@@ -12,10 +12,9 @@ use serde::Serialize;
 use serde_json::json;
 use serde_json::Value;
 use std::collections::HashMap;
-use tide::http::cache;
 
 use log::{debug, error, info, trace, warn};
-use std::cell::RefCell;
+
 use std::collections::VecDeque;
 use std::env;
 use std::ffi::CStr;
@@ -773,7 +772,7 @@ pub async fn memory_filter_handler(
                                         .try_into()
                                         .expect("Invalid address format"),
                                 );
-                                let address_offset = offset;
+
                                 offset += usize_size;
 
                                 let compressed_data_size = usize::from_le_bytes(

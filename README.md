@@ -56,7 +56,7 @@ Next, select a process and press the 「Open Process」 button.
 
 ### Debugger
 
-Only watchpoints are supported in the iOS environment.  
+Only watchpoints are supported in the iOS environment.
 
 <img width="500" alt="img4" src="https://github.com/user-attachments/assets/957910ec-0506-4951-b68b-1476764a3ae1">
 
@@ -65,7 +65,6 @@ Only watchpoints are supported in the iOS environment.
 The feature allows viewing and downloading files on the device
 
 <img width="500" alt="img4" src="https://github.com/user-attachments/assets/9873a16a-57f4-42a5-8244-2cdeaf1278a2">
-
 
 ## Android
 
@@ -103,6 +102,7 @@ To build the project using GitHub Actions, follow these steps:
 4. Above the list of workflow runs, click on "Run workflow".
 
 5. In the dialog box that appears:
+
    - Select the branch you want to run the workflow on (usually "main").
    - Enter a version tag for this build (e.g., "v1.0.0").
 
@@ -120,4 +120,9 @@ To build the project using GitHub Actions, follow these steps:
 Note: Make sure you have the necessary permissions in your forked repository to run workflows and access artifacts.
 
 ## Manual build
+
 For more information, please visit [Wiki](https://github.com/DoranekoSystems/memory-server/wiki/Build)
+
+# Credits
+
+[frida-ios-dump](https://github.com/AloneMonkey/frida-ios-dump)

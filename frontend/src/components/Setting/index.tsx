@@ -34,6 +34,7 @@ export function Setting() {
   const targetOS = useStore((state) => state.targetOS);
   const setTargetOS = useStore((state) => state.setTargetOS);
   const setIpAddress = useStore((state) => state.setIpAddress);
+  const setOpenProcessId = useStore((state) => state.setOpenProcessId);
   const memoryApi = useStore((state) => state.memoryApi);
   const setMemoryApi = useStore((state) => state.setMemoryApi);
 
@@ -97,7 +98,8 @@ export function Setting() {
 
     if (result.success) {
       setOpenedProcess(selectedProcess);
-      await fetchApplicationInfo(selectedProcess.pid); // Fetch Application Info after process is opened
+      await fetchApplicationInfo(selectedProcess.pid);
+      setOpenProcessId(selectedProcess.pid);
       return true;
     }
   };

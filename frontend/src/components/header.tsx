@@ -58,6 +58,12 @@ export function Header({ changePage }): any {
         )}
         <button
           className="text-sm font-medium hover:underline underline-offset-4"
+          onClick={() => changePage("tools")}
+        >
+          Tools
+        </button>
+        <button
+          className="text-sm font-medium hover:underline underline-offset-4"
           onClick={() => changePage("information")}
         >
           Information

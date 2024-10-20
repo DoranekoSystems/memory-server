@@ -739,6 +739,14 @@ pub async fn memory_filter_handler(
 
             let scan_align = scan_option.align;
 
+            let mut exact_bytes: Vec<u8> = vec![];
+            if filter_request.filter_method.as_str() == "exact" {
+                exact_bytes = match hex::decode(&filter_request.pattern) {
+                    Ok(bytes) => bytes,
+                    Err(_) => vec![],
+                };
+            }
+
             if !*is_error_occurred.lock().unwrap() {
                 paths.par_iter().for_each(|file_path| {
                     let mut error_occurred = is_error_occurred.lock().unwrap();
@@ -823,13 +831,20 @@ pub async fn memory_filter_handler(
                                         let old_val = &decompressed_data[offset..offset + size];
                                         let new_val = &buffer[offset..offset + size];
 
-                                        let pass_filter = match filter_request.data_type.as_str() {
-                                            _ => compare_values!(
-                                                new_val,
-                                                old_val,
-                                                filter_request.filter_method.as_str()
-                                            ),
-                                        };
+                                        let mut pass_filter: bool = false;
+                                        if filter_request.filter_method.as_str() == "exact" {
+                                            if exact_bytes == new_val {
+                                                pass_filter = true;
+                                            }
+                                        } else {
+                                            pass_filter = match filter_request.data_type.as_str() {
+                                                _ => compare_values!(
+                                                    new_val,
+                                                    old_val,
+                                                    filter_request.filter_method.as_str()
+                                                ),
+                                            };
+                                        }
                                         if pass_filter {
                                             serialized_data.extend_from_slice(
                                                 &(address + offset).to_le_bytes(),
@@ -874,13 +889,20 @@ pub async fn memory_filter_handler(
                                 }
                                 let new_val: &[u8] = &new_val_vec;
 
-                                let pass_filter = match filter_request.data_type.as_str() {
-                                    _ => compare_values!(
-                                        new_val,
-                                        old_val,
-                                        filter_request.filter_method.as_str()
-                                    ),
-                                };
+                                let mut pass_filter: bool = false;
+                                if filter_request.filter_method.as_str() == "exact" {
+                                    if exact_bytes == new_val {
+                                        pass_filter = true;
+                                    }
+                                } else {
+                                    pass_filter = match filter_request.data_type.as_str() {
+                                        _ => compare_values!(
+                                            new_val,
+                                            old_val,
+                                            filter_request.filter_method.as_str()
+                                        ),
+                                    };
+                                }
 
                                 if pass_filter {
                                     serialized_data.extend_from_slice(&address.to_le_bytes());

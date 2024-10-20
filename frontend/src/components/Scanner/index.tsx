@@ -478,11 +478,7 @@ export function Scanner({ currentPage }) {
                     </>
                   ) : (
                     <>
-                      {getCurrentTabState().findType === "exact" ||
-                      (getCurrentTabState().findType === "unknown" &&
-                        getCurrentTabState().scanResultsCount < 1000000) ? (
-                        <SelectItem value="exact">exact</SelectItem>
-                      ) : null}
+                      <SelectItem value="exact">exact</SelectItem>
                       <SelectItem value="changed">changed</SelectItem>
                       <SelectItem value="unchanged">unchanged</SelectItem>
                       <SelectItem value="increased">increased</SelectItem>

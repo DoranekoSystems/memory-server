@@ -35,8 +35,8 @@ class MemoryDumper {
     const region = this.parseProtection(regionProtection);
 
     // For each protection flag:
-    // 0 = don't care (match anything)
-    // 1 = must not have permission
+    // 0 = must not have permission
+    // 1 = don't care (match anything)
     // 2 = must have permission
     const matches = (flag: boolean, filter: number) => {
       if (filter === 0) return !flag;

@@ -8,7 +8,7 @@ import {
 } from "@/components/common/Card";
 import { Label } from "@/components/common/Label";
 import { Button } from "@/components/common/Button";
-import { TriStateCheckbox } from "@/components/common/Checkbox";
+import { TriStateCheckbox } from "@/components/common/CheckBox";
 import { useState, useEffect, useRef } from "react";
 import { useStore } from "@/lib/global-store";
 import { dumpApp } from "@/lib/tools/ipa_dump";
@@ -22,7 +22,7 @@ export function Tools() {
   const progressRef = useRef({ setProgress: setProgress });
   const targetOS = useStore((state) => state.targetOS);
 
-  // Memory protection flags (0: don't care, 1: must not have, 2: must have)
+  // Memory protection flags (0: must not have, 1: don't care, 2: must have)
   const [memoryProtection, setMemoryProtection] = useState({
     read: 2,
     write: 0,

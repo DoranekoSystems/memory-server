@@ -41,7 +41,21 @@ fn main() {
             build.file("src/cpp/src/windows/debugger.cpp");
         }
         "macos" => {
+            println!("cargo:rustc-link-arg=-lc++");
+            println!("cargo:rustc-link-arg=-framework");
+            println!("cargo:rustc-link-arg=Foundation");
+            println!("cargo:rustc-link-arg=-framework");
+            println!("cargo:rustc-link-arg=AVFoundation");
+            println!("cargo:rustc-link-arg=-framework");
+            println!("cargo:rustc-link-arg=CoreMedia");
+            println!("cargo:rustc-link-arg=-framework");
+            println!("cargo:rustc-link-arg=BackgroundTasks");
+            println!("cargo:rustc-link-arg=-framework");
+            println!("cargo:rustc-link-arg=SystemConfiguration");
             build.file("src/cpp/src/darwin/native_api.mm");
+            build.file("src/cpp/src/darwin/file_api.mm");
+            build.file("src/cpp/src/darwin/debugger.mm");
+            build.file("src/cpp/src/common/util.cpp");
         }
         "ios" => {
             println!("cargo:rustc-link-arg=-lc++");

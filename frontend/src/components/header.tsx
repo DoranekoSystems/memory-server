@@ -46,7 +46,7 @@ export function Header({ changePage }): any {
         >
           Memory View
         </button>
-        {targetOS === "ios" ? (
+        {targetOS === "ios" || targetOS === "macos" ? (
           <button
             className="text-sm font-medium hover:underline underline-offset-4"
             onClick={() => changePage("debugger")}

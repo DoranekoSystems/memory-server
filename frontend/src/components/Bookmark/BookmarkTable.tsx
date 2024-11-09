@@ -561,7 +561,8 @@ const BookmarkTable = ({ isVisible }) => {
                             <EditIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
-                        {targetOS === "ios" && serverMode == "normal" ? (
+                        {targetOS === "ios" ||
+                        (targetOS === "macos" && serverMode == "normal") ? (
                           <Tooltip title="Watch">
                             <IconButton
                               onClick={(e) => {

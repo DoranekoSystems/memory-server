@@ -58,6 +58,7 @@ fn main() {
             build.file("src/cpp/src/common/util.cpp");
         }
         "ios" => {
+            println!("cargo:rustc-link-arg=-mios-version-min=13.0");
             println!("cargo:rustc-link-arg=-lc++");
             println!("cargo:rustc-link-arg=-framework");
             println!("cargo:rustc-link-arg=Foundation");

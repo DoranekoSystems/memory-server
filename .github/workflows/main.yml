@@ -87,11 +87,19 @@ jobs:
       - name: Build Backend
         run: |
           cd backend
-          CARGO_TARGET_AARCH64_APPLE_IOS_LINKER=$TARGET_LINKER \
-          TARGET_AR=$TARGET_AR \
-          TARGET_CC=$TARGET_CC \
-          TARGET_CXX=$TARGET_CXX \
-          cargo build --target=$TARGET --release
+          if [ "${{ github.event.inputs.platform }}" = "ios" ]; then
+            CARGO_TARGET_AARCH64_APPLE_IOS_LINKER=$TARGET_LINKER \
+            TARGET_AR=$TARGET_AR \
+            TARGET_CC=$TARGET_CC \
+            TARGET_CXX=$TARGET_CXX \
+            cargo build --target=$TARGET --release
+          else
+            CC=$NDK_BIN_PATH/aarch64-linux-android33-clang \
+            CXX=$NDK_BIN_PATH/aarch64-linux-android33-clang++ \
+            AR=$NDK_BIN_PATH/llvm-ar \
+            CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$NDK_BIN_PATH/aarch64-linux-android33-clang \
+            cargo build --target=$TARGET --release
+          fi
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v3

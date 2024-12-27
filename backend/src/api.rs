@@ -2,7 +2,7 @@ use byteorder::{ByteOrder, LittleEndian};
 use hex;
 use lazy_static::lazy_static;
 use libc::{self, c_char, c_int, c_void};
-use lz4;
+use lz4_flex::block::compress_prepend_size;
 
 use memchr::memmem;
 use percent_encoding::percent_decode_str;
@@ -254,7 +254,7 @@ pub async fn read_memory_multiple_handler(
                 );
                 match nread {
                     Ok(_) => {
-                        let compressed_buffer = lz4::block::compress(&buffer, None, true).unwrap();
+                        let compressed_buffer = compress_prepend_size(&buffer);
                         let mut result_buffer = Vec::with_capacity(8 + compressed_buffer.len());
                         let compresed_buffer_size: u32 = compressed_buffer.len() as u32;
                         result_buffer.extend_from_slice(&1u32.to_le_bytes());
@@ -506,16 +506,7 @@ pub async fn memory_scan_handler(
                                     return vec![];
                                 }
 
-                                let compressed_buffer =
-                                    match lz4::block::compress(&buffer, None, false) {
-                                        Ok(buf) => buf,
-                                        Err(e) => {
-                                            *error_occurred = true;
-                                            *error_msg =
-                                                format!("Failed to compress buffer: {}", e);
-                                            return vec![];
-                                        }
-                                    };
+                                let compressed_buffer = lz4_flex::block::compress(&buffer);
 
                                 if let Err(e) = writer
                                     .write_all(&(compressed_buffer.len() as u64).to_le_bytes())
@@ -801,11 +792,19 @@ pub async fn memory_filter_handler(
                                     let compressed_data =
                                         &data_buffer[offset..offset + compressed_data_size];
                                     offset += compressed_data_size;
-                                    let decompressed_data = lz4::block::decompress(
-                                        compressed_data,
-                                        Some(uncompressed_data_size as i32),
-                                    )
-                                    .unwrap();
+                                    let decompressed_data = match lz4_flex::block::decompress(
+                                        &compressed_data,
+                                        uncompressed_data_size,
+                                    ) {
+                                        Ok(data) => data,
+                                        Err(e) => {
+                                            *error_occurred = true;
+                                            *error_msg =
+                                                format!("Failed to decompress data: {}", e);
+                                            return;
+                                        }
+                                    };
+
                                     let mut buffer: Vec<u8> =
                                         vec![0; (decompressed_data.len()) as usize];
                                     let _nread = match native_bridge::read_process_memory(

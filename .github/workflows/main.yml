@@ -97,4 +97,4 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: memory-server-${{ github.event.inputs.platform }}-${{ env.VERSION }}
-          path: target/${{ env.TARGET }}/release/app
+          path: target/${{ env.TARGET }}/release/memory-server

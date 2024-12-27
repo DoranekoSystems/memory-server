@@ -87,7 +87,7 @@ jobs:
       - name: Build Backend
         run: |
           cd backend
-          CARGO_TARGET_$(echo $TARGET | tr '[:lower:]-' '[:upper:]_')_LINKER=$TARGET_LINKER \
+          CARGO_TARGET_AARCH64_APPLE_IOS_LINKER=$TARGET_LINKER \
           TARGET_AR=$TARGET_AR \
           TARGET_CC=$TARGET_CC \
           TARGET_CXX=$TARGET_CXX \

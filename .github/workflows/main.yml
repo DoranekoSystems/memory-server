@@ -1,97 +1,100 @@
 name: Build
 
 on:
- workflow_dispatch:
-   inputs:
-     version:
-       description: 'Version tag (e.g., v1.0.0)'
-       required: true
-       default: 'v1.0.0'
-     platform:
-       description: 'Target platform (ios/android)'
-       required: true
-       type: choice
-       options:
-         - ios
-         - android
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag (e.g., v1.0.0)"
+        required: true
+        default: "v1.0.0"
+      platform:
+        description: "Target platform (ios/android)"
+        required: true
+        type: choice
+        options:
+          - ios
+          - android
 
 jobs:
- build:
-   runs-on: macos-latest
-   
-   steps:
-   - uses: actions/checkout@v3
+  build:
+    runs-on: macos-latest
 
-   - name: Set version environment variable
-     run: echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_ENV
+    steps:
+      - uses: actions/checkout@v3
 
-   - name: Setup Node.js
-     uses: actions/setup-node@v3
-     with:
-       node-version: '20'
+      - name: Set Xcode version
+        run: sudo xcode-select --switch /Applications/Xcode_15.4.app/Contents/Developer
 
-   - name: Setup Rust
-     uses: actions-rs/toolchain@v1
-     with:
-       toolchain: stable
-       override: true
+      - name: Set version environment variable
+        run: echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_ENV
 
-   - name: Add target
-     run: |
-       if [ "${{ github.event.inputs.platform }}" = "ios" ]; then
-         rustup target add aarch64-apple-ios
-       else
-         rustup target add aarch64-linux-android
-       fi
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "20"
 
-   - name: Setup Android NDK
-     if: github.event.inputs.platform == 'android'
-     uses: nttld/setup-ndk@v1
-     id: setup-ndk
-     with:
-       ndk-version: r26b
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
 
-   - name: Set NDK path
-     if: github.event.inputs.platform == 'android' 
-     run: |
-       echo "ANDROID_NDK_HOME=${{ steps.setup-ndk.outputs.ndk-path }}" >> $GITHUB_ENV
-       echo "NDK_BIN_PATH=${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/darwin-x86_64/bin" >> $GITHUB_ENV
-     
-   - name: Set Android build environment
-     if: github.event.inputs.platform == 'android'
-     run: |
-       echo "TARGET=aarch64-linux-android" >> $GITHUB_ENV
-       echo "TARGET_CC=$NDK_BIN_PATH/aarch64-linux-android33-clang" >> $GITHUB_ENV
-       echo "TARGET_CXX=$NDK_BIN_PATH/aarch64-linux-android33-clang++" >> $GITHUB_ENV
-       echo "TARGET_AR=$NDK_BIN_PATH/llvm-ar" >> $GITHUB_ENV
-       echo "TARGET_LINKER=$NDK_BIN_PATH/aarch64-linux-android33-clang" >> $GITHUB_ENV
+      - name: Add target
+        run: |
+          if [ "${{ github.event.inputs.platform }}" = "ios" ]; then
+            rustup target add aarch64-apple-ios
+          else
+            rustup target add aarch64-linux-android
+          fi
 
-   - name: Set iOS build environment
-     if: github.event.inputs.platform == 'ios'
-     run: |
-       echo "TARGET=aarch64-apple-ios" >> $GITHUB_ENV
-       echo "TARGET_CC=$(xcrun --sdk iphoneos --find clang)" >> $GITHUB_ENV
-       echo "TARGET_CXX=$(xcrun --sdk iphoneos --find clang++)" >> $GITHUB_ENV
-       echo "TARGET_AR=$(xcrun --sdk iphoneos --find ar)" >> $GITHUB_ENV
-       echo "TARGET_LINKER=$(xcrun --sdk iphoneos --find clang)" >> $GITHUB_ENV
+      - name: Setup Android NDK
+        if: github.event.inputs.platform == 'android'
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r26b
 
-   - name: Build Frontend
-     run: |
-       cd frontend
-       yarn install
-       yarn build
+      - name: Set NDK path
+        if: github.event.inputs.platform == 'android'
+        run: |
+          echo "ANDROID_NDK_HOME=${{ steps.setup-ndk.outputs.ndk-path }}" >> $GITHUB_ENV
+          echo "NDK_BIN_PATH=${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/darwin-x86_64/bin" >> $GITHUB_ENV
 
-   - name: Build Backend
-     run: |
-       cd backend
-       CARGO_TARGET_$(echo $TARGET | tr '[:lower:]-' '[:upper:]_')_LINKER=$TARGET_LINKER \
-       TARGET_AR=$TARGET_AR \
-       TARGET_CC=$TARGET_CC \
-       TARGET_CXX=$TARGET_CXX \
-       cargo build --target=$TARGET --release
+      - name: Set Android build environment
+        if: github.event.inputs.platform == 'android'
+        run: |
+          echo "TARGET=aarch64-linux-android" >> $GITHUB_ENV
+          echo "TARGET_CC=$NDK_BIN_PATH/aarch64-linux-android33-clang" >> $GITHUB_ENV
+          echo "TARGET_CXX=$NDK_BIN_PATH/aarch64-linux-android33-clang++" >> $GITHUB_ENV
+          echo "TARGET_AR=$NDK_BIN_PATH/llvm-ar" >> $GITHUB_ENV
+          echo "TARGET_LINKER=$NDK_BIN_PATH/aarch64-linux-android33-clang" >> $GITHUB_ENV
 
-   - name: Upload Artifact
-     uses: actions/upload-artifact@v3
-     with:
-       name: memory-server-${{ github.event.inputs.platform }}-${{ env.VERSION }}
-       path: target/${{ env.TARGET }}/release/app
+      - name: Set iOS build environment
+        if: github.event.inputs.platform == 'ios'
+        run: |
+          echo "TARGET=aarch64-apple-ios" >> $GITHUB_ENV
+          echo "TARGET_CC=$(xcrun --sdk iphoneos --find clang)" >> $GITHUB_ENV
+          echo "TARGET_CXX=$(xcrun --sdk iphoneos --find clang++)" >> $GITHUB_ENV
+          echo "TARGET_AR=$(xcrun --sdk iphoneos --find ar)" >> $GITHUB_ENV
+          echo "TARGET_LINKER=$(xcrun --sdk iphoneos --find clang)" >> $GITHUB_ENV
+
+      - name: Build Frontend
+        run: |
+          cd frontend
+          yarn install
+          yarn build
+
+      - name: Build Backend
+        run: |
+          cd backend
+          CARGO_TARGET_$(echo $TARGET | tr '[:lower:]-' '[:upper:]_')_LINKER=$TARGET_LINKER \
+          TARGET_AR=$TARGET_AR \
+          TARGET_CC=$TARGET_CC \
+          TARGET_CXX=$TARGET_CXX \
+          cargo build --target=$TARGET --release
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: memory-server-${{ github.event.inputs.platform }}-${{ env.VERSION }}
+          path: target/${{ env.TARGET }}/release/app

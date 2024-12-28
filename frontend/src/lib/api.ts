@@ -182,7 +182,7 @@ export class MemoryApi {
   async exploreDirectory(encodedPath: String) {
     try {
       const response = await axios.get(
-        this.baseUrl + `exploredirectory?path=${encodedPath}&max_depth=1`
+        this.baseUrl + `directory?path=${encodedPath}&max_depth=1`
       );
       return this.handleResponse(response);
     } catch (error) {
@@ -252,6 +252,17 @@ export class MemoryApi {
   async getServerInfo() {
     try {
       const response = await axios.get(this.baseUrl + "serverinfo");
+      return this.handleResponse(response);
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  async changeProcessState({ doPlay }: { doPlay: boolean }) {
+    try {
+      const response = await axios.put(this.baseUrl + "process", {
+        do_play: doPlay,
+      });
       return this.handleResponse(response);
     } catch (error) {
       return this.handleError(error);

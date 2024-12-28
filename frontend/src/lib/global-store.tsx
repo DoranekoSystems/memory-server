@@ -76,6 +76,8 @@ interface GlobalState {
   setTargetOS: (targetOS: string) => void;
   memoryApi: MemoryApi;
   setMemoryApi: (memoryApi: MemoryApi) => void;
+  doPlay: boolean;
+  setDoPlay: (isPlaying: boolean) => void;
 }
 
 export const useStore = create<GlobalState>((set) => ({
@@ -91,6 +93,8 @@ export const useStore = create<GlobalState>((set) => ({
   setTargetOS: (name: string) => set({ targetOS: name }),
   memoryApi: new MemoryApi("127.0.0.1"),
   setMemoryApi: (api: MemoryApi) => set({ memoryApi: api }),
+  doPlay: true,
+  setDoPlay: (state) => set({ doPlay: state }),
 }));
 
 export const useWatchpointStore = create<WatchpointStore>((set) => ({

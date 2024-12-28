@@ -30,7 +30,8 @@ import { getMemoryRegions } from "@/lib/utils";
 import { IconButton, Tooltip } from "@mui/material";
 import BookmarkBorderIcon from "@mui/icons-material/BookmarkBorder";
 import ClearIcon from "@mui/icons-material/Clear";
-import { useBookmarkStore } from "../../lib/global-store";
+import { useBookmarkStore } from "@/lib/global-store";
+import { ControlPanel } from "@/components/ControlPanel";
 
 export function Scanner({ currentPage }) {
   const memoryApi = useStore((state) => state.memoryApi);
@@ -394,6 +395,7 @@ export function Scanner({ currentPage }) {
   return (
     <div className="flex flex-col min-h-screen">
       <main className="flex flex-col items-center flex-grow mt-8 px-4">
+        {serverMode !== "embedded" ? <ControlPanel /> : ""}
         <TabBar
           tabs={tabs}
           activeTab={activeTab}

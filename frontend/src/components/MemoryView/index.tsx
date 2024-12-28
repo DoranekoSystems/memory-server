@@ -19,6 +19,7 @@ import {
 import { formatFloat } from "@/lib/utils";
 import { PlusIcon, SaveIcon } from "@/components/common/Icon";
 import { isHexadecimal } from "@/lib/utils";
+import { ControlPanel } from "@/components/ControlPanel";
 
 export function MemoryView({ currentPage }) {
   const memoryApi = useStore((state) => state.memoryApi);
@@ -42,6 +43,7 @@ export function MemoryView({ currentPage }) {
   const [isVisible, setIsVisible] = useState(currentPage === "memoryview");
   const [focusedRegionId, setFocusedRegionId] = useState(null);
   const regionRefs = useRef({});
+  const serverMode = useStore((state) => state.serverMode);
 
   useEffect(() => {
     setIsVisible(currentPage === "memoryview");
@@ -919,6 +921,7 @@ export function MemoryView({ currentPage }) {
 
   return (
     <div className="flex flex-col items-center flex-grow mt-8 px-4">
+      {serverMode !== "embedded" ? <ControlPanel /> : ""}
       <Card className="w-full max-w-7xl mb-6 bg-gray-50">
         <CardHeader>
           <CardTitle className="text-2xl mb-1 text-gray-800">

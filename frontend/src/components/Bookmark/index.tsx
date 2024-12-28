@@ -17,6 +17,7 @@ import {
   SelectValue,
 } from "@/components/common/Select";
 import BookmarkTable from "@/components/Bookmark/BookmarkTable";
+import { ControlPanel } from "@/components/ControlPanel";
 
 import {
   getByteLengthFromScanType,
@@ -160,6 +161,7 @@ export function Bookmark({ currentPage }) {
   return (
     <div className="flex flex-col min-h-screen">
       <main className="flex flex-col items-center flex-grow mt-8 px-4">
+        {serverMode !== "embedded" ? <ControlPanel /> : ""}
         <Card className="w-full max-w-4xl mb-6">
           <CardHeader className="flex justify-between">
             <CardTitle className="text-2xl mb-2">Bookmark</CardTitle>

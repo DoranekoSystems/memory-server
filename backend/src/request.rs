@@ -101,3 +101,14 @@ pub struct RemoveBreakPointResponse {
     pub success: bool,
     pub message: String,
 }
+
+#[derive(Deserialize)]
+pub struct ChangeProcessStateRequest {
+    pub do_play: bool,
+}
+
+#[derive(Serialize)]
+pub struct ChangeProcessStateResponse {
+    pub success: bool,
+    pub message: String,
+}

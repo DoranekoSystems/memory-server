@@ -47,6 +47,7 @@ lazy_static! {
     static ref GLOBAL_SCAN_OPTION: RwLock<HashMap<String, request::MemoryScanRequest>> =
         RwLock::new(HashMap::new());
     static ref JSON_QUEUE: Arc<Mutex<VecDeque<String>>> = Arc::new(Mutex::new(VecDeque::new()));
+    static ref GLOBAL_PROCESS_STATE: RwLock<bool> = RwLock::new(false);
 }
 
 #[no_mangle]
@@ -569,8 +570,8 @@ pub async fn memory_scan_handler(
                     .collect::<Vec<_>>()
             })
             .collect();
-
-        if do_suspend && is_suspend_success {
+        let mut do_play = GLOBAL_PROCESS_STATE.write().unwrap();
+        if do_suspend && is_suspend_success && *do_play {
             unsafe {
                 native_bridge::resume_process(pid);
             }
@@ -1211,7 +1212,8 @@ pub async fn memory_filter_handler(
                     new_positions = results.into_iter().filter_map(|x| x).collect();
                 }
                 Err(response) => {
-                    if do_suspend && is_suspend_success {
+                    let mut do_play = GLOBAL_PROCESS_STATE.write().unwrap();
+                    if do_suspend && is_suspend_success && *do_play {
                         unsafe {
                             native_bridge::resume_process(pid);
                         }
@@ -1226,7 +1228,8 @@ pub async fn memory_filter_handler(
                 .unwrap();
             return Ok(response);
         }
-        if do_suspend && is_suspend_success {
+        let mut do_play = GLOBAL_PROCESS_STATE.write().unwrap();
+        if do_suspend && is_suspend_success && *do_play {
             unsafe {
                 native_bridge::resume_process(pid);
             }
@@ -1725,6 +1728,54 @@ pub async fn remove_breakpoint_handler(
             warp::reply::json(&request::RemoveBreakPointResponse {
                 success: false,
                 message: format!("Pid not set"),
+            }),
+            StatusCode::BAD_REQUEST,
+        ))
+    }
+}
+
+pub async fn change_process_state_handler(
+    pid_state: Arc<Mutex<Option<i32>>>,
+    state_request: request::ChangeProcessStateRequest,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    let pid = pid_state.lock().unwrap();
+
+    if let Some(_pid) = *pid {
+        let result = if state_request.do_play {
+            unsafe { native_bridge::resume_process(_pid) }
+        } else {
+            unsafe { native_bridge::suspend_process(_pid) }
+        };
+
+        let ret = match result {
+            true => Ok(warp::reply::with_status(
+                warp::reply::json(&request::ChangeProcessStateResponse {
+                    success: true,
+                    message: format!(
+                        "Process {} successfully",
+                        if state_request.do_play {
+                            "resumed"
+                        } else {
+                            "suspend"
+                        }
+                    ),
+                }),
+                StatusCode::OK,
+            )),
+            false => Ok(warp::reply::with_status(
+                warp::reply::json(&request::ChangeProcessStateResponse {
+                    success: false,
+                    message: format!("Failed to change process state. Error"),
+                }),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )),
+        };
+        return ret;
+    } else {
+        Ok(warp::reply::with_status(
+            warp::reply::json(&request::ChangeProcessStateResponse {
+                success: false,
+                message: "Pid not set".to_string(),
             }),
             StatusCode::BAD_REQUEST,
         ))

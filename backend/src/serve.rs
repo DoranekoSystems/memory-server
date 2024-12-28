@@ -16,7 +16,7 @@ pub async fn serve(mode: i32, host: IpAddr, port: u16) {
     let cors = warp::cors()
         .allow_any_origin()
         .allow_headers(vec!["*", "Content-Type"])
-        .allow_methods(vec!["GET", "POST", "DELETE", "OPTIONS"]);
+        .allow_methods(vec!["GET", "POST", "PUT", "DELETE", "OPTIONS"]);
 
     let static_files = warp::path::tail()
         .map(|tail: Tail| tail.as_str().to_string())
@@ -93,7 +93,7 @@ pub async fn serve(mode: i32, host: IpAddr, port: u16) {
             api::resolve_addr_handler(pid_state, resolve_addr_request).await
         });
 
-    let explore_directory = warp::path!("exploredirectory")
+    let explore_directory = warp::path!("directory")
         .and(warp::get())
         .and(warp::query::<request::ExploreDirectoryRequest>())
         .and_then(|explore_directory_request| async move {
@@ -152,6 +152,14 @@ pub async fn serve(mode: i32, host: IpAddr, port: u16) {
         .and(warp::get())
         .and_then(api::get_exception_info_handler);
 
+    let change_process_state = warp::path!("process")
+        .and(warp::put())
+        .and(warp::body::json())
+        .and(api::with_state(pid_state.clone()))
+        .and_then(|state_request, pid_state| async move {
+            api::change_process_state_handler(pid_state, state_request).await
+        });
+
     let routes = open_process
         .or(read_memory)
         .or(read_memory_multiple)
@@ -171,6 +179,7 @@ pub async fn serve(mode: i32, host: IpAddr, port: u16) {
         .or(set_breakpoint)
         .or(remove_breakpoint)
         .or(get_exception_info)
+        .or(change_process_state)
         .or(static_files)
         .with(cors)
         .with(warp::log::custom(logger::http_log));

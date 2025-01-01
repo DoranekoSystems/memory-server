@@ -1,4 +1,4 @@
-# memory-server
+# NexDbg
 
 Next Generation Browser-based Process Memory Analyser.  
 All data is bundled in one binary.

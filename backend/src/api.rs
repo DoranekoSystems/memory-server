@@ -36,6 +36,7 @@ use warp::hyper::Body;
 use warp::{http::Response, http::StatusCode, Filter, Rejection, Reply};
 
 use crate::native_bridge;
+use crate::ptrscan;
 use crate::request;
 use crate::util;
 
@@ -1779,5 +1780,40 @@ pub async fn change_process_state_handler(
             }),
             StatusCode::BAD_REQUEST,
         ))
+    }
+}
+
+pub async fn pointermap_generate_handler(
+    pid_state: Arc<Mutex<Option<i32>>>,
+    request: request::PointerMapGenerateRequest,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    let pid = pid_state.lock().unwrap();
+
+    if let Some(pid) = *pid {
+        let result = ptrscan::generate_pointermap(pid);
+
+        match result {
+            Ok(binary_data) => {
+                let response = Response::builder()
+                    .header("Content-Type", "application/octet-stream")
+                    .body(hyper::Body::from(binary_data))
+                    .unwrap();
+                Ok(response)
+            }
+            Err(_) => {
+                let empty_buffer = Vec::new();
+                let response = Response::builder()
+                    .header("Content-Type", "application/octet-stream")
+                    .body(hyper::Body::from(empty_buffer))
+                    .unwrap();
+                Ok(response)
+            }
+        }
+    } else {
+        let response = Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(hyper::Body::from("Pid not set"))
+            .unwrap();
+        Ok(response)
     }
 }

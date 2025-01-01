@@ -100,11 +100,12 @@ SSIZE_T write_memory_native(int pid, void *address, size_t size, unsigned char *
     return bytesWritten;
 }
 
-void setMemoryProtection(DWORD protect, char *permissions)
+void setMemoryProtection(DWORD protect, DWORD type, char *permissions)
 {
     permissions[0] = '-';
     permissions[1] = '-';
     permissions[2] = '-';
+    permissions[3] = '-';
 
     switch (protect & 0xFF)
     {
@@ -133,9 +134,13 @@ void setMemoryProtection(DWORD protect, char *permissions)
             break;
     }
 
-    if (protect & PAGE_GUARD)
+    if (type & MEM_PRIVATE || type & MEM_IMAGE)
     {
-        permissions[3] = 'g';
+        permissions[3] = 'p';  // private
+    }
+    else if (type & MEM_MAPPED)
+    {
+        permissions[3] = 's';  // shared
     }
     else
     {
@@ -162,7 +167,7 @@ void enumerate_regions_to_buffer(DWORD pid, char *buffer, size_t buffer_size)
         char permissions[5] = "----";
         if (memInfo.State == MEM_COMMIT)
         {
-            setMemoryProtection(memInfo.Protect, permissions);
+            setMemoryProtection(memInfo.Protect, memInfo.Type, permissions);
         }
         else
         {

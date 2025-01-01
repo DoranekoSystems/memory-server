@@ -112,3 +112,8 @@ pub struct ChangeProcessStateResponse {
     pub success: bool,
     pub message: String,
 }
+
+#[derive(Deserialize)]
+pub struct PointerMapGenerateRequest {
+    pub address: u64,
+}

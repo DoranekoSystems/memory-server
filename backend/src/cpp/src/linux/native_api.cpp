@@ -14,6 +14,8 @@ static process_vm_writev_func PROCESS_VM_WRITEV = nullptr;
 
 #endif
 
+unsigned char EI_MAGIC[] = {0x7F, 'E', 'L', 'F'};
+
 int debug_log(LogLevel level, const char *format, ...)
 {
     va_list args;
@@ -312,6 +314,26 @@ bool is_elf64(const char *filename)
     return (e_ident[EI_CLASS] == ELFCLASS64);
 }
 
+bool is_elf(const char *filename)
+{
+    int fd = open(filename, O_RDONLY);
+    if (fd < 0)
+    {
+        return false;
+    }
+
+    unsigned char e_ident[EI_NIDENT];
+    bool result = false;
+
+    if (read(fd, e_ident, EI_NIDENT) == EI_NIDENT)
+    {
+        result = (memcmp(e_ident, EI_MAGIC, 4) == 0);
+    }
+
+    close(fd);
+    return result;
+}
+
 bool read_elf_header_from_memory(int pid, uintptr_t base_address, Elf64_Ehdr *elf_header)
 {
     if (read_memory_native(pid, base_address, sizeof(Elf64_Ehdr),
@@ -392,6 +414,7 @@ ModuleInfo *enummodule_native(pid_t pid, size_t *count)
 
         if (perms[0] == 'r' && !std::string(module_path).empty())
         {
+            if (!is_elf(module_path)) continue;
             if (compare_elf_headers(pid, start, module_path))
             {
                 ModuleInfo info;

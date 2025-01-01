@@ -1,7 +1,7 @@
 use libc::{self, c_char, c_int, c_void};
 use serde_json::json;
-use std::ffi::CStr;
-use std::io::Error;
+use std::ffi::{CStr, CString};
+use std::io::{BufRead, BufReader, Error};
 
 #[cfg_attr(target_os = "android", link(name = "c++_static", kind = "static"))]
 #[cfg_attr(target_os = "android", link(name = "c++abi", kind = "static"))]
@@ -177,6 +177,52 @@ pub fn enum_modules(pid: i32) -> Result<Vec<serde_json::Value>, String> {
     unsafe { libc::free(module_info_ptr as *mut libc::c_void) };
 
     Ok(modules)
+}
+
+pub fn enum_regions(pid: i32) -> Result<Vec<serde_json::Value>, String> {
+    let mut buffer = vec![0u8; 1024 * 1024]; // 1MB buffer
+
+    unsafe {
+        enumerate_regions_to_buffer(pid, buffer.as_mut_ptr(), buffer.len());
+    }
+
+    let buffer_cstring = unsafe { CString::from_vec_unchecked(buffer) };
+    let buffer_string = match buffer_cstring.into_string() {
+        Ok(s) => s,
+        Err(_) => return Err("Failed to convert buffer to string".to_string()),
+    };
+
+    let buffer_reader = BufReader::new(buffer_string.as_bytes());
+    let mut regions = Vec::new();
+
+    for line in buffer_reader.lines() {
+        if let Ok(line) = line {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+
+            if parts.len() >= 5 {
+                let addresses: Vec<&str> = parts[0].split('-').collect();
+                if addresses.len() == 2 {
+                    let region = json!({
+                        "start_address": addresses[0],
+                        "end_address": addresses[1],
+                        "protection": parts[1],
+                        "file_path": if parts.len() > 5 {
+                            parts[5..].join(" ")
+                        } else {
+                            "".to_string()
+                        }
+                    });
+                    regions.push(region);
+                }
+            }
+        }
+    }
+
+    if regions.is_empty() {
+        Err("No regions found".to_string())
+    } else {
+        Ok(regions)
+    }
 }
 
 pub fn get_application_info(pid: i32) -> Result<String, Error> {

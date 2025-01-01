@@ -268,4 +268,19 @@ export class MemoryApi {
       return this.handleError(error);
     }
   }
+
+  async generatePointermap(address: Number) {
+    try {
+      const response = await axios.post(
+        this.baseUrl + "pointermap",
+        { address },
+        {
+          responseType: "arraybuffer",
+        }
+      );
+      return this.handleResponse(response);
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
 }

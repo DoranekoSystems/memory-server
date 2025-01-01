@@ -1,3 +1,4 @@
+#[recursion_limit = "1024"]
 use include_dir::{include_dir, Dir};
 use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
@@ -160,6 +161,14 @@ pub async fn serve(mode: i32, host: IpAddr, port: u16) {
             api::change_process_state_handler(pid_state, state_request).await
         });
 
+    let pointermap_generate = warp::path!("pointermap")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(api::with_state(pid_state.clone()))
+        .and_then(|request, pid_state| async move {
+            api::pointermap_generate_handler(pid_state, request).await
+        });
+
     let routes = open_process
         .or(read_memory)
         .or(read_memory_multiple)
@@ -180,6 +189,7 @@ pub async fn serve(mode: i32, host: IpAddr, port: u16) {
         .or(remove_breakpoint)
         .or(get_exception_info)
         .or(change_process_state)
+        .or(pointermap_generate)
         .or(static_files)
         .with(cors)
         .with(warp::log::custom(logger::http_log));
